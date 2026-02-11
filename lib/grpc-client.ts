@@ -2,6 +2,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
 import { getRegionConfig } from "./regions";
+import { isGrpcEnabled, GrpcDisabledError } from "./grpc-enabled";
 import type {
   PushToRabbitMQQueueRequest,
   BroadcastToRabbitMQExchangeRequest,
@@ -100,12 +101,17 @@ function createMetadata(
   return metadata;
 }
 
+export { GrpcDisabledError };
+
 export function getGrpcClient(
   regionCode: string,
   userId?: string,
   clientIP?: string,
   requestId?: string
 ): OperationsServiceClient {
+  if (!isGrpcEnabled()) {
+    throw new GrpcDisabledError();
+  }
   const regionConfig = getRegionConfig(regionCode);
   
   if (!regionConfig) {

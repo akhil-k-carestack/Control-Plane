@@ -77,7 +77,7 @@ const commonUtilitiesItems = [
 
 const numbersItems = [
   {
-    name: "Numbers Not in Bifrost",
+    name: "Numbers Lookup",
     href: "/numbers",
     icon: Phone,
     color: "text-amber-400",
@@ -104,6 +104,17 @@ const twilioItems = [
   },
 ];
 
+const simwoodItems = [
+  {
+    name: "Dashboard",
+    href: "/simwood",
+    icon: Phone,
+    color: "text-blue-400",
+    activeBg: "bg-gradient-to-r from-blue-500 to-cyan-600",
+    permission: "simwood",
+  },
+];
+
 const adminItems = [
   {
     name: "Audit Logs",
@@ -123,6 +134,7 @@ export function Sidebar() {
     commonUtilities: true,
     numbers: true,
     twilio: true,
+    simwood: true,
     admin: true,
   });
 
@@ -330,6 +342,50 @@ export function Sidebar() {
                     "flex items-center gap-3 rounded-lg px-3 py-2 pl-6 text-sm font-medium transition-all duration-200",
                     active
                       ? `${item.activeBg} text-white shadow-lg shadow-yellow-500/20`
+                      : "text-slate-400 hover:bg-slate-800 hover:text-white hover:scale-[1.02]"
+                  )}
+                >
+                  <item.icon className={cn("h-4 w-4", active ? "text-white" : item.color)} />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </CollapsibleContent>
+        </Collapsible>
+        )}
+
+        {/* SIMWOOD Section */}
+        {simwoodItems.some((item) => hasPermission(item.href)) && (
+          <Collapsible
+            open={openSections.simwood}
+            onOpenChange={() => toggleSection("simwood")}
+          >
+          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-blue-300 hover:bg-slate-800 transition-all duration-200 hover:scale-[1.02]">
+            <span className="flex items-center gap-2">
+              <span className="w-1 h-4 bg-gradient-to-b from-blue-400 to-cyan-600 rounded-full"></span>
+              SIMWOOD
+            </span>
+            {openSections.simwood ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-1 mt-1">
+            {simwoodItems.map((item) => {
+              const active = isActive(item.href);
+              const hasAccess = hasPermission(item.href);
+              
+              if (!hasAccess) return null;
+              
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 pl-6 text-sm font-medium transition-all duration-200",
+                    active
+                      ? `${item.activeBg} text-white shadow-lg shadow-blue-500/20`
                       : "text-slate-400 hover:bg-slate-800 hover:text-white hover:scale-[1.02]"
                   )}
                 >

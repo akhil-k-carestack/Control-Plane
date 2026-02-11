@@ -8,5 +8,6 @@ export const AUDIT_LOG_ACTIONS = {
   GET_CALL_DETAILS: "get-call-details",
   LIST_PRACTICES: "list-practices",
   EXPORT_CALL_DETAILS: "export-call-details",
+  SIMWOOD: "simwood",
 } as const;
 

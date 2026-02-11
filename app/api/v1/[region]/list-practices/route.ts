@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGrpcClient, grpcCall } from "@/lib/grpc-client";
+import { getGrpcClient, grpcCall, GrpcDisabledError } from "@/lib/grpc-client";
 import { isValidRegion } from "@/lib/regions";
 import type { ListPracticesRequest, ListPracticesResponse } from "@/types/grpc";
 import { getUserDetails, getClientIP } from "@/lib/utils";
@@ -47,6 +47,9 @@ export async function GET(
     );
     return NextResponse.json(response);
   } catch (error) {
+    if (error instanceof GrpcDisabledError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
     console.error("gRPC error:", error);
     return NextResponse.json(
       {

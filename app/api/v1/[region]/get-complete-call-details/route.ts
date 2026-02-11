@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGrpcClient, grpcCall } from "@/lib/grpc-client";
+import { getGrpcClient, grpcCall, GrpcDisabledError } from "@/lib/grpc-client";
 import { isValidRegion } from "@/lib/regions";
 import type { GetCompleteCallDetailsRequest, GetCompleteCallDetailsResponse } from "@/types/grpc";
 import { getUserDetails, getClientIP } from "@/lib/utils";
@@ -87,14 +87,14 @@ export async function POST(
     );
 
     return NextResponse.json(response);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    if (error instanceof GrpcDisabledError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+    const message = error instanceof Error ? error.message : "Failed to get complete call details";
     console.error("gRPC error:", error);
     return NextResponse.json(
-      { 
-        error: error.message || "Failed to get complete call details",
-        success: false,
-        message: error.message || "Failed to get complete call details"
-      },
+      { error: message, success: false, message },
       { status: 500 }
     );
   }

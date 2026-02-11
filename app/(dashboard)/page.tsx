@@ -165,16 +165,16 @@ export default async function DashboardPage({
                     <div className="p-2 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-600/20">
                       <Phone className="h-5 w-5 text-amber-400" />
                     </div>
-                    Numbers Not in Bifrost
+                    Numbers Lookup
                   </CardTitle>
                   <CardDescription>
-                    Lookup numbers not in Bifrost
+                    Find numbers not in Bifrost for a specific trunk SID
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Link href="/numbers">
                     <Button className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-lg shadow-amber-500/30 transition-all duration-200">
-                      Open Numbers
+                      Open Numbers Lookup
                     </Button>
                   </Link>
                 </CardContent>

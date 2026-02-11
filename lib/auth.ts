@@ -43,6 +43,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               "generate-signed-url",
               "call-details",
               "list-practices",
+              "simwood",
             ];
           } else {
             // Regular users get permissions from their role

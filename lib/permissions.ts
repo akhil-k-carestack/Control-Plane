@@ -12,6 +12,7 @@ export const PERMISSIONS = {
   CALL_DETAILS: "call-details",
   LIST_PRACTICES: "list-practices",
   EXPORT_CALL_DETAILS: "export-call-details",
+  SIMWOOD: "simwood",
 } as const;
 
 export const ROLES = {
