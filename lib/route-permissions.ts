@@ -12,6 +12,7 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   "/numbers-not-in-number-cache": PERMISSIONS.NUMBERS_NOT_IN_CACHE,
   "/twilio": PERMISSIONS.RABBITMQ, // Placeholder - adjust when Twilio permissions are added
   "/simwood": PERMISSIONS.SIMWOOD,
+  "/simwood/port-in": PERMISSIONS.SIMWOOD,
   "/audit-logs": "super_admin", // Special route - only super_admin can access
 };
 

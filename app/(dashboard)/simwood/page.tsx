@@ -873,7 +873,7 @@ export default function SimwoodPage() {
                       <TableBody>
                         {standardNumbers.map((num, index) => (
                           <TableRow key={index}>
-                            <TableCell className="text-slate-300">{(num as Record<string, unknown>).type ?? num.bill_class ?? "—"}</TableCell>
+                            <TableCell className="text-slate-300">{String((num as unknown as Record<string, unknown>).type ?? num.bill_class ?? "—")}</TableCell>
                             <TableCell>{num.country_code}</TableCell>
                             <TableCell className="font-medium">{num.number}</TableCell>
                             <TableCell>
@@ -976,7 +976,7 @@ export default function SimwoodPage() {
                       <TableBody>
                         {goldNumbers.map((num, index) => (
                           <TableRow key={index}>
-                            <TableCell className="text-slate-300">{(num as Record<string, unknown>).type ?? num.bill_class ?? "—"}</TableCell>
+                            <TableCell className="text-slate-300">{String((num as unknown as Record<string, unknown>).type ?? num.bill_class ?? "—")}</TableCell>
                             <TableCell>{num.country_code}</TableCell>
                             <TableCell className="font-medium">{num.number}</TableCell>
                             <TableCell>

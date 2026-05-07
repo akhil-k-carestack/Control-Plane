@@ -50,7 +50,12 @@ export async function simwoodRequest<T>(
     throw new Error(`SIMWOOD API error: ${response.status} - ${errorText}`);
   }
 
-  return response.json();
+  const responseData = await response.json();
+  if (responseData.success == false) {
+    throw new Error(`SIMWOOD API error: ${responseData.errors?.join(", ")}`);
+  }
+
+  return responseData;
 }
 
 /**
@@ -405,10 +410,163 @@ export async function getAvailableGoldNumbers(
 /**
  * Allocate a number (buy a number)
  */
-export async function allocateNumber(number: string, countryCode?: string): Promise<any> {
+export async function allocateNumber(number: string, countryCode?: string): Promise<unknown> {
   const fullNumber = countryCode ? `${countryCode}${number}` : number;
   console.log("fullNumber", fullNumber);
   return simwoodRequest(`/numbers/${SIMWOOD_ACCOUNT_ID}/allocated/${fullNumber}`, {
     method: "PUT",
   });
+}
+
+export interface PortInRequestEntry {
+  rowId: string;
+  rowNumber: number;
+  number: string;
+  numberType: "local" | "mobile";
+  mainBillingNumber?: string;
+  accountNumber?: string;
+  currentProvider?: string;
+  /** Losing Communications Provider CUPID (see GET /porting/{account}/lcps) */
+  lcpCupid?: string;
+  numberOfLines?: string;
+  numberOfChannels?: string;
+  installationFirstName?: string;
+  installationLastName?: string;
+  installationProperty?: string;
+  installationStreet?: string;
+  installationTownCity?: string;
+  installationPostcode?: string;
+  associatedNumbers?: string;
+  contactEmail?: string;
+  lineType?: string;
+  pac?: string;
+  mbn?: string;
+  payload: Record<string, string>;
+}
+
+export interface PortInRequestResult {
+  rowId: string;
+  number: string;
+  ref: string;
+  mbn: string;
+  date: string;
+  status: string;
+  error?: string;
+}
+
+const SIMWOOD_PORTING_GNP_PATH =
+  process.env.SIMWOOD_PORTING_GNP_PATH || `/porting/${SIMWOOD_ACCOUNT_ID}/gnp`;
+const SIMWOOD_PORTING_MNP_PATH =
+  process.env.SIMWOOD_PORTING_MNP_PATH || `/porting/${SIMWOOD_ACCOUNT_ID}/mnp`;
+
+function readFirstString(
+  source: Record<string, unknown>,
+  keys: string[]
+): string {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number") {
+      return String(value);
+    }
+  }
+  return "";
+}
+
+function getNestedRecord(source: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = source[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizePortType(lineType?: string): "single" | "multi" {
+  const value = (lineType || "").trim().toLowerCase();
+  if (value.includes("multi")) return "multi";
+  return "single";
+}
+
+function parseAssociatedNumbers(value?: string): string[] {
+  if (!value?.trim()) return [];
+  return value
+    .split(/[,\n;|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export async function createPortInRequest(
+  entry: PortInRequestEntry
+): Promise<PortInRequestResult> {
+  let response: Record<string, unknown>;
+  if (entry.numberType === "mobile") {
+    const payload: Record<string, string> = {
+      msisdn: entry.number,
+      pac: entry.pac?.trim() || "",
+    };
+    if (entry.contactEmail?.trim()) payload.contact_email = entry.contactEmail.trim();
+
+    response = await simwoodRequest<Record<string, unknown>>(SIMWOOD_PORTING_MNP_PATH, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  } else {
+    const numbers = [
+      { number: entry.mainBillingNumber?.trim() || entry.number, type: "mbn", action: "port" },
+      ...parseAssociatedNumbers(entry.associatedNumbers).map((num) => ({
+        number: num,
+        type: "associated",
+        action: "port",
+      })),
+    ];
+
+    const payload: Record<string, unknown> = {
+      mbn: entry.mainBillingNumber?.trim() || entry.number,
+      lcp: entry.currentProvider?.trim() || "",
+      lcp_cupid: entry.lcpCupid?.trim() || "",
+      contact_email: entry.contactEmail?.trim() || "",
+      account_number: entry.accountNumber?.trim() || "",
+      billing_postcode: entry.installationPostcode?.trim() || "",
+      type: normalizePortType(entry.lineType),
+      lines: Number(entry.numberOfLines || "0") || 1,
+      channels: Number(entry.numberOfChannels || "0") || 1,
+      customer: {
+        forename: entry.installationFirstName?.trim() || "",
+        name: entry.installationLastName?.trim() || "",
+        premises: entry.installationProperty?.trim() || "",
+        thoroughfare: entry.installationStreet?.trim() || "",
+        locality: entry.installationTownCity?.trim() || "",
+        postcode: entry.installationPostcode?.trim() || "",
+      },
+      numbers,
+    };
+
+    response = await simwoodRequest<Record<string, unknown>>(SIMWOOD_PORTING_GNP_PATH, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const responseData = getNestedRecord(response, "data");
+
+  return {
+    rowId: entry.rowId,
+    number: entry.number,
+    ref:
+      readFirstString(response, ["ref", "Ref", "reference", "Reference"]) ||
+      readFirstString(responseData ?? {}, ["ref", "Ref", "reference", "Reference"]),
+    mbn:
+      readFirstString(response, ["mbn", "MBN"]) ||
+      readFirstString(responseData ?? {}, ["mbn", "MBN"]) ||
+      entry.mainBillingNumber ||
+      "",
+    date:
+      readFirstString(response, ["date", "Date", "portDate", "port_date", "date_port"]) ||
+      readFirstString(responseData ?? {}, ["date", "Date", "portDate", "port_date", "date_port"]),
+    status:
+      readFirstString(response, ["status", "Status", "status_code"]) ||
+      readFirstString(responseData ?? {}, ["status", "Status", "status_code"]) ||
+      "submitted",
+  };
 }

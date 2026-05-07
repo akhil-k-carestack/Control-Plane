@@ -113,6 +113,14 @@ const simwoodItems = [
     activeBg: "bg-gradient-to-r from-blue-500 to-cyan-600",
     permission: "simwood",
   },
+  {
+    name: "Port-In",
+    href: "/simwood/port-in",
+    icon: FileText,
+    color: "text-blue-400",
+    activeBg: "bg-gradient-to-r from-blue-500 to-cyan-600",
+    permission: "simwood",
+  },
 ];
 
 const adminItems = [
@@ -148,8 +156,9 @@ export function Sidebar() {
   const isActive = (href: string) => pathname === href;
 
   // Get user permissions from session
-  const permissions = (session?.user as any)?.permissions || [];
-  const role = (session?.user as any)?.role || null;
+  const sessionUser = session?.user as { permissions?: string[]; role?: string | null } | undefined;
+  const permissions = sessionUser?.permissions ?? [];
+  const role = sessionUser?.role ?? null;
 
   // Check if user has permission for a route
   const hasPermission = (route: string) => {
@@ -354,7 +363,7 @@ export function Sidebar() {
         </Collapsible>
         )}
 
-        {/* SIMWOOD Section */}
+        {/* Simwood Section */}
         {simwoodItems.some((item) => hasPermission(item.href)) && (
           <Collapsible
             open={openSections.simwood}
@@ -363,7 +372,7 @@ export function Sidebar() {
           <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-blue-300 hover:bg-slate-800 transition-all duration-200 hover:scale-[1.02]">
             <span className="flex items-center gap-2">
               <span className="w-1 h-4 bg-gradient-to-b from-blue-400 to-cyan-600 rounded-full"></span>
-              SIMWOOD
+              Simwood
             </span>
             {openSections.simwood ? (
               <ChevronDown className="h-4 w-4" />
