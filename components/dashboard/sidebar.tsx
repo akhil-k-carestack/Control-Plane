@@ -114,7 +114,7 @@ const simwoodItems = [
     permission: "simwood",
   },
   {
-    name: "Port-In",
+    name: "Port In",
     href: "/simwood/port-in",
     icon: FileText,
     color: "text-blue-400",

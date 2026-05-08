@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserDetails } from "@/lib/utils";
 import { requirePermissionFromSession, PERMISSIONS } from "@/lib/permissions";
 import { createPortInRequest, type PortInRequestEntry, type PortInRequestResult } from "@/lib/simwood";
+import { createAuditLog } from "@/lib/audit";
+import { AUDIT_LOG_ACTIONS } from "@/lib/constants";
 
 interface PortInBody {
   entries?: PortInRequestEntry[];
@@ -34,6 +36,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const requestId = crypto.randomUUID();
     const results: PortInRequestResult[] = [];
 
     for (const entry of entries) {
@@ -107,11 +110,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const successfulCount = results.filter((result) => result.status.toLowerCase() !== "failed").length;
+    const failedCount = results.filter((result) => result.status.toLowerCase() === "failed").length;
+
+    await createAuditLog(
+      AUDIT_LOG_ACTIONS.SIMWOOD,
+      "SIMWOOD",
+      requestId,
+      {
+        action: "initiate-port-in",
+        totalSelected: entries.length,
+        totalProcessed: results.length,
+        successful: successfulCount,
+        failed: failedCount,
+        statuses: results.map((result) => ({
+          rowId: result.rowId,
+          number: result.number,
+          status: result.status,
+          ref: result.ref,
+          error: result.error ?? null,
+        })),
+      }
+    );
+
     return NextResponse.json({
       success: true,
       total: results.length,
-      successful: results.filter((result) => result.status.toLowerCase() !== "failed").length,
-      failed: results.filter((result) => result.status.toLowerCase() === "failed").length,
+      successful: successfulCount,
+      failed: failedCount,
       results,
     });
   } catch (error) {

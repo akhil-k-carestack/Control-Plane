@@ -346,6 +346,83 @@ export async function getSmsCdrReport(
   );
 }
 
+export interface PortingRequestItem {
+  ref?: string | number;
+  mbn?: string;
+  msisdn?: string;
+  date?: string;
+  date_added?: string;
+  date_updated?: string;
+  date_port?: string;
+  crd?: string;
+  pac?: string;
+  status?: string;
+  status_code?: string;
+  port_type?: "local" | "mobile";
+  [key: string]: unknown;
+}
+
+/**
+ * Get porting requests list (GNP).
+ */
+export async function getPortingRequests(): Promise<PortingRequestItem[]> {
+  const extractData = (
+    result:
+      | PortingRequestItem[]
+      | {
+          success?: boolean;
+          data?: PortingRequestItem[];
+        }
+  ): PortingRequestItem[] => {
+    if (Array.isArray(result)) return result;
+    if (result && Array.isArray(result.data)) return result.data;
+    return [];
+  };
+
+  const [gnpResult, mnpResult] = await Promise.allSettled([
+    simwoodRequest<
+      | PortingRequestItem[]
+      | {
+          success?: boolean;
+          data?: PortingRequestItem[];
+        }
+    >(`/porting/${SIMWOOD_ACCOUNT_ID}/ports`),
+    simwoodRequest<
+      | PortingRequestItem[]
+      | {
+          success?: boolean;
+          data?: PortingRequestItem[];
+        }
+    >(`/porting/${SIMWOOD_ACCOUNT_ID}/mnp`),
+  ]);
+
+  const gnpRows =
+    gnpResult.status === "fulfilled"
+      ? extractData(gnpResult.value).map((row) => ({ ...row, port_type: "local" as const }))
+      : [];
+
+  const mnpRows =
+    mnpResult.status === "fulfilled"
+      ? extractData(mnpResult.value).map((row) => ({
+          ...row,
+          mbn: row.mbn ?? row.msisdn ?? "",
+          date: row.date ?? row.date_added ?? row.date_updated ?? "",
+          crd: row.crd ?? row.date_port ?? "",
+          port_type: "mobile" as const,
+        }))
+      : [];
+
+  if (gnpRows.length === 0 && mnpRows.length === 0) {
+    const gnpErr = gnpResult.status === "rejected" ? String(gnpResult.reason) : "";
+    const mnpErr = mnpResult.status === "rejected" ? String(mnpResult.reason) : "";
+    throw new Error(`Failed to fetch porting requests. GNP: ${gnpErr} MNP: ${mnpErr}`);
+  }
+
+  return [...gnpRows, ...mnpRows].sort((a, b) =>
+    String(b.ref ?? "").localeCompare(String(a.ref ?? ""), undefined, { numeric: true })
+  );
+}
+
 /**
  * Get file content by hash (portal). Used for SMS CDR file after report.
  */
@@ -482,8 +559,12 @@ function getNestedRecord(source: Record<string, unknown>, key: string): Record<s
     : null;
 }
 
-function normalizePortType(lineType?: string): "single" | "multi" {
+function normalizePortType(lineType?: string): "single" | "multi" | "sub_single" | "sub_multi" {
   const value = (lineType || "").trim().toLowerCase();
+  if (value.includes("sub") && value.includes("multi")) return "sub_multi";
+  if (value.includes("sub") && value.includes("single")) return "sub_single";
+  if (value === "subsingle") return "sub_single";
+  if (value === "submulti") return "sub_multi";
   if (value.includes("multi")) return "multi";
   return "single";
 }

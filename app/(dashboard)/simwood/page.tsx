@@ -50,6 +50,8 @@ interface MyNumber {
   block: string;
   type: string;
   SMS: string;
+  crd?: string;
+  status?: string;
 }
 
 interface AvailableNumber {
@@ -70,6 +72,27 @@ interface Trunk {
   enabled_webrtc: string | null;
 }
 
+interface PortingDashboardItem {
+  ref: string;
+  mbn: string;
+  date: string;
+  crd: string;
+  status: string;
+  statusCode: string;
+}
+
+const PORTING_STATUS_LABELS: Record<string, string> = {
+  rcvd: "Received",
+  pending: "Pending",
+  accepted: "Accepted",
+  complete: "Complete",
+  completed: "Complete",
+  reject_lcp: "Rejected",
+  rejected_lcp: "Rejected",
+  submitted_lcp: "Submitted LCP",
+  submitted_rh: "Submitted RH",
+};
+
 export default function SimwoodPage() {
   const [balance, setBalance] = useState<Balance[] | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(true);
@@ -82,6 +105,7 @@ export default function SimwoodPage() {
   const [myNumbersSearch, setMyNumbersSearch] = useState("");
   const [myNumbersPage, setMyNumbersPage] = useState(1);
   const MY_NUMBERS_PAGE_SIZE = 10;
+  const [myNumbersPortedTodayOnly, setMyNumbersPortedTodayOnly] = useState(false);
   const [trunks, setTrunks] = useState<Trunk[]>([]);
   const [trunksLoading, setTrunksLoading] = useState(false);
   const [showTrunkDialog, setShowTrunkDialog] = useState(false);
@@ -135,6 +159,15 @@ export default function SimwoodPage() {
   const [smsCdrPage, setSmsCdrPage] = useState(1);
   const SMS_CDR_PAGE_SIZE = 10;
 
+  // Porting Dashboard
+  const [portingDashboardRows, setPortingDashboardRows] = useState<PortingDashboardItem[]>([]);
+  const [portingDashboardLoading, setPortingDashboardLoading] = useState(false);
+  const [portingSearch, setPortingSearch] = useState("");
+  const [portingStatusFilter, setPortingStatusFilter] = useState("all");
+  const [portingUpcomingAcceptedOnly, setPortingUpcomingAcceptedOnly] = useState(false);
+  const [portingPage, setPortingPage] = useState(1);
+  const PORTING_PAGE_SIZE = 10;
+
   // Load balance on mount
   useEffect(() => {
     loadBalance();
@@ -146,6 +179,16 @@ export default function SimwoodPage() {
       loadTrunks();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "porting-dashboard" && portingDashboardRows.length === 0) {
+      loadPortingDashboard();
+    }
+  }, [activeTab, portingDashboardRows.length]);
+
+  useEffect(() => {
+    setPortingPage(1);
+  }, [portingSearch, portingStatusFilter, portingUpcomingAcceptedOnly, portingDashboardRows.length]);
 
   // When Configure dialog opens, fetch current trunk, number type, and emergency 999 details
   useEffect(() => {
@@ -254,9 +297,105 @@ export default function SimwoodPage() {
     }
   };
 
-  const loadMyNumbers = async () => {
+  const loadMyNumbers = async (portedTomorrowOnly = myNumbersPortedTodayOnly) => {
     try {
       setMyNumbersLoading(true);
+      if (portedTomorrowOnly) {
+        const response = await fetch("/api/simwood/porting-dashboard");
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to fetch ported numbers");
+        }
+        const result = (await response.json()) as {
+          data?: Array<Record<string, unknown>>;
+        };
+        const rows = Array.isArray(result.data) ? result.data : [];
+        const tomorrow = new Date();
+        tomorrow.setHours(0, 0, 0, 0);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const toDateOnly = (value: unknown): Date | null => {
+          if (typeof value !== "string" || !value.trim()) return null;
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) return null;
+          d.setHours(0, 0, 0, 0);
+          return d;
+        };
+
+        const isAccepted = (row: Record<string, unknown>): boolean => {
+          const status = String(row.status ?? "").toLowerCase();
+          const statusCode = String(row.status_code ?? "").toLowerCase();
+          return status.includes("accepted") || statusCode.includes("accepted");
+        };
+
+        const list: MyNumber[] = rows
+          .filter((row) => {
+            if (!isAccepted(row)) return false;
+            const crdRaw = String(row.crd ?? row.date_port ?? "");
+            const crdDate = toDateOnly(crdRaw);
+            return !!crdDate && crdDate.getTime() === tomorrow.getTime();
+          })
+          .map((row) => ({
+            country_code: "",
+            number: String(row.mbn ?? row.msisdn ?? row.number ?? ""),
+            gold_price: "",
+            block: "",
+            type: String(row.port_type ?? (row.msisdn ? "mobile" : "local")),
+            SMS: "",
+            crd: String(row.crd ?? row.date_port ?? "—"),
+            status: String(row.status ?? row.status_code ?? "—"),
+          }))
+          .filter((item) => item.number.trim().length > 0);
+
+        const enrichedList = await Promise.all(
+          list.map(async (item) => {
+            try {
+              const params = new URLSearchParams({ number: item.number });
+              const validateRes = await fetch(`/api/simwood/validate?${params.toString()}`);
+              if (!validateRes.ok) return item;
+              const validateData = (await validateRes.json()) as {
+                data?: { country_code?: string; type?: string };
+              };
+              return {
+                ...item,
+                country_code: validateData?.data?.country_code ?? item.country_code,
+                type: validateData?.data?.type ?? item.type,
+              };
+            } catch {
+              return item;
+            }
+          })
+        );
+
+        const normalizePortedDisplayNumber = (rawNumber: string, countryCode?: string): string => {
+          const digits = String(rawNumber ?? "").replace(/\D+/g, "");
+          if (!digits) return "";
+
+          const ccDigits = String(countryCode ?? "").replace(/\D+/g, "");
+          let local = digits;
+
+          if (ccDigits && local.startsWith(ccDigits) && local.length > ccDigits.length) {
+            local = local.slice(ccDigits.length);
+          } else if (local.startsWith("44") && local.length > 2) {
+            // Fallback for UK numbers when validate API does not return country_code.
+            local = local.slice(2);
+          }
+
+          return local.replace(/^0+/, "");
+        };
+
+        const displayList = enrichedList.map((item) => ({
+          ...item,
+          number: normalizePortedDisplayNumber(item.number, item.country_code),
+        }));
+
+        setMyNumbers(displayList);
+        setMyNumbersPage(1);
+        setMyNumbersSearch("");
+        toast.success(`Loaded ${displayList.length} ported numbers (CRD tomorrow + Accepted)`);
+        return;
+      }
+
       const response = await fetch("/api/simwood/allocated", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -586,6 +725,86 @@ export default function SimwoodPage() {
     }
   };
 
+  const loadPortingDashboard = async () => {
+    try {
+      setPortingDashboardLoading(true);
+      const response = await fetch("/api/simwood/porting-dashboard");
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Failed to fetch porting dashboard");
+      }
+
+      const result = (await response.json()) as {
+        data?: Array<Record<string, unknown>>;
+      };
+      const rows = Array.isArray(result.data) ? result.data : [];
+      const normalized: PortingDashboardItem[] = rows.map((row) => ({
+        ref: String(row.ref ?? row.orderid ?? "—"),
+        mbn: String(row.mbn ?? "—"),
+        date: String(row.date ?? row.date_added ?? "—"),
+        crd: String(row.crd ?? row.date_port ?? "—"),
+        status: String(row.status ?? row.status_code ?? "—"),
+        statusCode: String(row.status_code ?? ""),
+      }));
+      setPortingDashboardRows(normalized);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load porting dashboard");
+      setPortingDashboardRows([]);
+    } finally {
+      setPortingDashboardLoading(false);
+    }
+  };
+
+  const toLocalDateOnly = (value: string): Date | null => {
+    if (!value || value === "—") return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
+  };
+
+  const formatDateOnly = (value: string): string => {
+    const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!value || value === "—") return "—";
+    if (dateOnlyPattern.test(value.trim())) return value.trim();
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const getPortingStatusKey = (row: PortingDashboardItem): string =>
+    (row.statusCode || row.status || "unknown")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_");
+
+  const getPortingStatusLabel = (statusKey: string): string => {
+    if (PORTING_STATUS_LABELS[statusKey]) return PORTING_STATUS_LABELS[statusKey];
+    return statusKey
+      .split("_")
+      .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+      .join(" ");
+  };
+
+  const getPortingStatusClass = (statusKey: string): string => {
+    if (statusKey.includes("accept")) return "bg-blue-500/20 text-blue-300 border border-blue-500/30";
+    if (statusKey.includes("complete")) return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+    if (statusKey.includes("reject")) return "bg-red-500/20 text-red-300 border border-red-500/30";
+    if (statusKey.includes("submit")) return "bg-amber-500/20 text-amber-300 border border-amber-500/30";
+    if (statusKey.includes("pending") || statusKey.includes("rcvd")) return "bg-slate-500/20 text-slate-300 border border-slate-500/30";
+    return "bg-slate-500/20 text-slate-300 border border-slate-500/30";
+  };
+
+  const isAcceptedStatus = (row: PortingDashboardItem): boolean =>
+    getPortingStatusKey(row).includes("accepted");
+  const isCompletedStatus = (row: PortingDashboardItem): boolean =>
+    getPortingStatusKey(row).includes("complete");
+
   const handleAllocateNumber = async (number: string, countryCode?: string) => {
     try {
       setAllocatingNumber(number);
@@ -628,6 +847,114 @@ export default function SimwoodPage() {
     myNumbersPage * MY_NUMBERS_PAGE_SIZE
   );
 
+  const portingStatuses = Array.from(
+    new Set(
+      portingDashboardRows
+        .map((row) => getPortingStatusKey(row))
+        .filter((value) => value && value !== "unknown")
+    )
+  );
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const portingFilteredRows = portingDashboardRows
+    .filter((row) => {
+      const search = portingSearch.trim().toLowerCase();
+      if (search) {
+        const matched =
+          row.mbn.toLowerCase().includes(search) || row.ref.toLowerCase().includes(search);
+        if (!matched) return false;
+      }
+
+      if (portingStatusFilter !== "all") {
+        const rowStatus = getPortingStatusKey(row);
+        if (rowStatus !== portingStatusFilter) return false;
+      }
+
+      if (portingUpcomingAcceptedOnly) {
+        if (!isAcceptedStatus(row)) return false;
+        const crdDate = toLocalDateOnly(row.crd);
+        if (!crdDate || crdDate < today) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (!portingUpcomingAcceptedOnly) return 0;
+      const aDate = toLocalDateOnly(a.crd);
+      const bDate = toLocalDateOnly(b.crd);
+      if (!aDate && !bDate) return 0;
+      if (!aDate) return 1;
+      if (!bDate) return -1;
+      return aDate.getTime() - bDate.getTime();
+    });
+
+  const acceptedTodayRows = portingDashboardRows.filter((row) => {
+    if (!isAcceptedStatus(row)) return false;
+    const crdDate = toLocalDateOnly(row.crd);
+    return !!crdDate && crdDate.getTime() === today.getTime();
+  });
+
+  const acceptedTomorrowRows = portingDashboardRows.filter((row) => {
+    if (!isAcceptedStatus(row)) return false;
+    const crdDate = toLocalDateOnly(row.crd);
+    return !!crdDate && crdDate.getTime() === tomorrow.getTime();
+  });
+
+  const completedYesterdayRows = portingDashboardRows.filter((row) => {
+    if (!isCompletedStatus(row)) return false;
+    const crdDate = toLocalDateOnly(row.crd);
+    return !!crdDate && crdDate.getTime() === yesterday.getTime();
+  });
+
+  const completedTodayRows = portingDashboardRows.filter((row) => {
+    if (!isCompletedStatus(row)) return false;
+    const crdDate = toLocalDateOnly(row.crd);
+    return !!crdDate && crdDate.getTime() === today.getTime();
+  });
+  const portingSubmittedCount = portingDashboardRows.filter((row) =>
+    getPortingStatusKey(row).includes("submit")
+  ).length;
+  const portingRejectedCount = portingDashboardRows.filter((row) =>
+    getPortingStatusKey(row).includes("reject")
+  ).length;
+  const portingPendingCount = portingDashboardRows.filter((row) => {
+    const key = getPortingStatusKey(row);
+    return key.includes("pending") || key.includes("rcvd");
+  }).length;
+  const portingAcceptedCount = portingDashboardRows.filter((row) => isAcceptedStatus(row)).length;
+  const portingCompletedCount = portingDashboardRows.filter((row) => isCompletedStatus(row)).length;
+  const portingShowingStart = portingFilteredRows.length === 0 ? 0 : (portingPage - 1) * PORTING_PAGE_SIZE + 1;
+  const portingShowingEnd = Math.min(portingPage * PORTING_PAGE_SIZE, portingFilteredRows.length);
+
+  const copySectionNumbers = async (
+    rows: PortingDashboardItem[],
+    sectionLabel: string
+  ) => {
+    const list = rows
+      .map((row) => row.mbn.trim())
+      .filter((value) => value && value !== "—")
+      .join(",");
+    if (!list) {
+      toast.error(`No numbers available in ${sectionLabel}`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(list);
+      toast.success(`Copied ${rows.length} numbers from ${sectionLabel}`);
+    } catch {
+      toast.error("Failed to copy numbers");
+    }
+  };
+  const portingTotalPages = Math.ceil(portingFilteredRows.length / PORTING_PAGE_SIZE) || 1;
+  const portingPaginatedRows = portingFilteredRows.slice(
+    (portingPage - 1) * PORTING_PAGE_SIZE,
+    portingPage * PORTING_PAGE_SIZE
+  );
+
   return (
     <RouteProtection>
       <div className="space-y-6">
@@ -665,6 +992,7 @@ export default function SimwoodPage() {
             <TabsTrigger value="gold-numbers">Gold</TabsTrigger>
             <TabsTrigger value="voice-cdr">Voice CDR</TabsTrigger>
             <TabsTrigger value="sms-cdr">SMS CDR</TabsTrigger>
+            <TabsTrigger value="porting-dashboard">Port In</TabsTrigger>
           </TabsList>
 
           {/* My Numbers Tab */}
@@ -681,6 +1009,7 @@ export default function SimwoodPage() {
                     <Select
                       value={myNumbersQuantity.toString()}
                       onValueChange={(value) => setMyNumbersQuantity(parseInt(value, 10))}
+                      disabled={myNumbersPortedTodayOnly}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -692,7 +1021,29 @@ export default function SimwoodPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={loadMyNumbers} disabled={myNumbersLoading}>
+                  <div className="ml-auto flex items-center gap-4 rounded-md border border-slate-800 px-3 py-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="radio"
+                        name="my-number-source"
+                        checked={!myNumbersPortedTodayOnly}
+                        onChange={() => setMyNumbersPortedTodayOnly(false)}
+                        className="h-4 w-4 accent-blue-500"
+                      />
+                      All numbers
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="radio"
+                        name="my-number-source"
+                        checked={myNumbersPortedTodayOnly}
+                        onChange={() => setMyNumbersPortedTodayOnly(true)}
+                        className="h-4 w-4 accent-blue-500"
+                      />
+                      CRD tomorrow numbers
+                    </label>
+                  </div>
+                  <Button onClick={() => loadMyNumbers(myNumbersPortedTodayOnly)} disabled={myNumbersLoading}>
                     {myNumbersLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -737,7 +1088,7 @@ export default function SimwoodPage() {
                           {myNumbersPaginated.map((num, index) => (
                             <TableRow key={`${num.number}-${index}`}>
                               <TableCell>{num.type}</TableCell>
-                              <TableCell>{num.country_code}</TableCell>
+                              <TableCell>{num.country_code || "—"}</TableCell>
                               <TableCell className="font-medium">{num.number}</TableCell>
                               <TableCell>
                                 <div className="flex flex-wrap gap-2">
@@ -1222,6 +1573,398 @@ export default function SimwoodPage() {
                       Next
                     </Button>
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="porting-dashboard" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Port In</CardTitle>
+              <CardDescription>
+                View combined local and mobile porting requests from SIMWOOD /v3/porting/{`{account}`}/ports and /mnp.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Total</p>
+                    <p className="text-2xl font-semibold text-white">{portingDashboardRows.length}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">All loaded requests</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Rejected</p>
+                    <p className="text-2xl font-semibold text-red-300">{portingRejectedCount}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Rejected by provider flow</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Accepted</p>
+                    <p className="text-2xl font-semibold text-blue-300">{portingAcceptedCount}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Ready/approved requests</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Completed</p>
+                    <p className="text-2xl font-semibold text-emerald-300">{portingCompletedCount}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Finished requests</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Submitted</p>
+                    <p className="text-2xl font-semibold text-amber-300">{portingSubmittedCount}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Sent to LCP/RH</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Pending/Received</p>
+                    <p className="text-2xl font-semibold text-slate-200">{portingPendingCount}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Awaiting progress</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Input
+                  placeholder="Search number or reference"
+                  value={portingSearch}
+                  onChange={(e) => setPortingSearch(e.target.value)}
+                />
+                <Select value={portingStatusFilter} onValueChange={setPortingStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {portingStatuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {getPortingStatusLabel(status)}
+                        </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="upcoming-accepted-only"
+                    type="checkbox"
+                    checked={portingUpcomingAcceptedOnly}
+                    onChange={(e) => setPortingUpcomingAcceptedOnly(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-900"
+                  />
+                  <Label htmlFor="upcoming-accepted-only">Upcoming accepted (CRD &gt;= today)</Label>
+                </div>
+              </div>
+
+              <div>
+                <Button onClick={loadPortingDashboard} disabled={portingDashboardLoading}>
+                  {portingDashboardLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Refreshing...
+                    </>
+                  ) : (
+                    "Refresh"
+                  )}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-base">
+                        Accepted{" "}
+                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          CRD Today
+                        </span>
+                      </CardTitle>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copySectionNumbers(acceptedTodayRows, "Accepted - today")}
+                      >
+                        Copy numbers
+                      </Button>
+                    </div>
+                    <CardDescription>{acceptedTodayRows.length} requests</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ref</TableHead>
+                          <TableHead>Number</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>CRD</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {acceptedTodayRows.slice(0, 8).map((row) => (
+                          <TableRow key={`today-${row.ref}`}>
+                            <TableCell>{row.ref}</TableCell>
+                            <TableCell>{row.mbn}</TableCell>
+                            <TableCell>{formatDateOnly(row.date)}</TableCell>
+                            <TableCell>{formatDateOnly(row.crd)}</TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${getPortingStatusClass(getPortingStatusKey(row))}`}>
+                                {getPortingStatusLabel(getPortingStatusKey(row))}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {acceptedTodayRows.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-slate-400">
+                              No accepted requests for today.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-base">
+                        Accepted{" "}
+                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                          CRD Tomorrow
+                        </span>
+                      </CardTitle>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copySectionNumbers(acceptedTomorrowRows, "Accepted - tomorrow")}
+                      >
+                        Copy numbers
+                      </Button>
+                    </div>
+                    <CardDescription>{acceptedTomorrowRows.length} requests</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ref</TableHead>
+                          <TableHead>Number</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>CRD</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {acceptedTomorrowRows.slice(0, 8).map((row) => (
+                          <TableRow key={`tomorrow-${row.ref}`}>
+                            <TableCell>{row.ref}</TableCell>
+                            <TableCell>{row.mbn}</TableCell>
+                            <TableCell>{formatDateOnly(row.date)}</TableCell>
+                            <TableCell>{formatDateOnly(row.crd)}</TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${getPortingStatusClass(getPortingStatusKey(row))}`}>
+                                {getPortingStatusLabel(getPortingStatusKey(row))}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {acceptedTomorrowRows.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-slate-400">
+                              No accepted requests for tomorrow.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-base">
+                        Completed{" "}
+                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                          CRD Yesterday
+                        </span>
+                      </CardTitle>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copySectionNumbers(completedYesterdayRows, "Completed - yesterday")}
+                      >
+                        Copy numbers
+                      </Button>
+                    </div>
+                    <CardDescription>{completedYesterdayRows.length} requests</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ref</TableHead>
+                          <TableHead>Number</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>CRD</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {completedYesterdayRows.slice(0, 8).map((row) => (
+                          <TableRow key={`completed-yesterday-${row.ref}`}>
+                            <TableCell>{row.ref}</TableCell>
+                            <TableCell>{row.mbn}</TableCell>
+                            <TableCell>{formatDateOnly(row.date)}</TableCell>
+                            <TableCell>{formatDateOnly(row.crd)}</TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${getPortingStatusClass(getPortingStatusKey(row))}`}>
+                                {getPortingStatusLabel(getPortingStatusKey(row))}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {completedYesterdayRows.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-slate-400">
+                              No completed requests for yesterday.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-base">
+                        Completed{" "}
+                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          CRD Today
+                        </span>
+                      </CardTitle>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copySectionNumbers(completedTodayRows, "Completed - today")}
+                      >
+                        Copy numbers
+                      </Button>
+                    </div>
+                    <CardDescription>{completedTodayRows.length} requests</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ref</TableHead>
+                          <TableHead>Number</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>CRD</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {completedTodayRows.slice(0, 8).map((row) => (
+                          <TableRow key={`completed-today-${row.ref}`}>
+                            <TableCell>{row.ref}</TableCell>
+                            <TableCell>{row.mbn}</TableCell>
+                            <TableCell>{formatDateOnly(row.date)}</TableCell>
+                            <TableCell>{formatDateOnly(row.crd)}</TableCell>
+                            <TableCell>
+                              <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${getPortingStatusClass(getPortingStatusKey(row))}`}>
+                                {getPortingStatusLabel(getPortingStatusKey(row))}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {completedTodayRows.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-slate-400">
+                              No completed requests for today.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-300 font-medium">All porting requests</p>
+                <p className="text-xs text-slate-400">
+                  Showing {portingShowingStart}-{portingShowingEnd} of {portingFilteredRows.length}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-800 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Ref</TableHead>
+                      <TableHead>Number</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>CRD</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {portingPaginatedRows.map((row) => (
+                      <TableRow key={`porting-${row.ref}-${row.mbn}`}>
+                        <TableCell>{row.ref}</TableCell>
+                        <TableCell>{row.mbn}</TableCell>
+                        <TableCell>{formatDateOnly(row.date)}</TableCell>
+                        <TableCell>{formatDateOnly(row.crd)}</TableCell>
+                        <TableCell>
+                          <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${getPortingStatusClass(getPortingStatusKey(row))}`}>
+                            {getPortingStatusLabel(getPortingStatusKey(row))}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!portingDashboardLoading && portingPaginatedRows.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-slate-400">
+                          No matching porting requests.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              {portingTotalPages > 1 && (
+                <div className="flex justify-between items-center p-2 border border-slate-800 rounded-md">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={portingPage <= 1}
+                    onClick={() => setPortingPage((page) => Math.max(1, page - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-slate-400">
+                    Page {portingPage} of {portingTotalPages} ({portingFilteredRows.length} results)
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={portingPage >= portingTotalPages}
+                    onClick={() => setPortingPage((page) => page + 1)}
+                  >
+                    Next
+                  </Button>
                 </div>
               )}
             </CardContent>
