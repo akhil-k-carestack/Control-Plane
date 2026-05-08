@@ -7,6 +7,7 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   "/provision/check-sync": PERMISSIONS.CHECK_SYNC,
   "/common-utilities/rabbitmq": PERMISSIONS.RABBITMQ,
   "/common-utilities/generate-signed-url": PERMISSIONS.GENERATE_SIGNED_URL,
+  "/common-utilities/app-logs": PERMISSIONS.APP_LOGS,
   "/call-details": PERMISSIONS.CALL_DETAILS,
   "/numbers": PERMISSIONS.NUMBERS_NOT_IN_BIFROST,
   "/numbers-not-in-number-cache": PERMISSIONS.NUMBERS_NOT_IN_CACHE,

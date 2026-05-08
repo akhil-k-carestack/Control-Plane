@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Link2,
   Phone,
+  ArrowRightLeft,
   Database,
   Settings,
   Search,
@@ -73,6 +74,14 @@ const commonUtilitiesItems = [
     activeBg: "bg-gradient-to-r from-indigo-500 to-purple-600",
     permission: "call-details",
   },
+  {
+    name: "App Logs",
+    href: "/common-utilities/app-logs",
+    icon: FileText,
+    color: "text-cyan-400",
+    activeBg: "bg-gradient-to-r from-cyan-500 to-blue-600",
+    permission: "app-logs",
+  },
 ];
 
 const numbersItems = [
@@ -100,7 +109,7 @@ const twilioItems = [
     href: "/twilio",
     icon: Settings,
     color: "text-yellow-400",
-    activeBg: "bg-gradient-to-r from-yellow-500 to-amber-600",
+    activeBg: "bg-gradient-to-r from-yellow-500 to-amber-600"
   },
 ];
 
@@ -116,7 +125,7 @@ const simwoodItems = [
   {
     name: "Port In",
     href: "/simwood/port-in",
-    icon: FileText,
+    icon: ArrowRightLeft,
     color: "text-blue-400",
     activeBg: "bg-gradient-to-r from-blue-500 to-cyan-600",
     permission: "simwood",

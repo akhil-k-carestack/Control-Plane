@@ -1,7 +1,5 @@
 import { getDataSource } from "./database/data-source";
 import { User } from "./database/entities/User";
-import { Role } from "./database/entities/Role";
-import { Permission } from "./database/entities/Permission";
 
 export const PERMISSIONS = {
   RABBITMQ: "rabbitmq",
@@ -9,6 +7,7 @@ export const PERMISSIONS = {
   NUMBERS_NOT_IN_BIFROST: "numbers-not-in-bifrost",
   NUMBERS_NOT_IN_CACHE: "numbers-not-in-cache",
   GENERATE_SIGNED_URL: "generate-signed-url",
+  APP_LOGS: "app-logs",
   CALL_DETAILS: "call-details",
   LIST_PRACTICES: "list-practices",
   EXPORT_CALL_DETAILS: "export-call-details",

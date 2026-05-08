@@ -73,6 +73,7 @@ export default async function DashboardPage({
       {/* Common Utilities Section */}
       {(hasAccess("/common-utilities/rabbitmq") || 
         hasAccess("/common-utilities/generate-signed-url") || 
+        hasAccess("/common-utilities/app-logs") ||
         hasAccess("/call-details")) && (
         <div className="space-y-4">
           <h2 className="text-xl font-semibold bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
@@ -147,6 +148,29 @@ export default async function DashboardPage({
                 </CardContent>
               </Card>
             )}
+
+            {hasAccess("/common-utilities/app-logs") && (
+              <Card className="border-cyan-800/50 hover:border-cyan-500/80 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 hover:scale-[1.02] bg-gradient-to-br from-slate-900 to-slate-950">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-600/20">
+                      <FileText className="h-5 w-5 text-cyan-400" />
+                    </div>
+                    App Logs
+                  </CardTitle>
+                  <CardDescription>
+                    Upload app logs by agent UUID
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link href="/common-utilities/app-logs">
+                    <Button className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white shadow-lg shadow-cyan-500/30 transition-all duration-200">
+                      Open App Logs
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       )}
@@ -208,33 +232,66 @@ export default async function DashboardPage({
       )}
 
       {/* Twilio Section */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold bg-gradient-to-r from-yellow-400 to-amber-500 bg-clip-text text-transparent">
-          Twilio
-        </h2>
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="border-yellow-800/50 hover:border-yellow-500/80 transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/20 hover:scale-[1.02] bg-gradient-to-br from-slate-900 to-slate-950">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-gradient-to-br from-yellow-500/20 to-amber-600/20">
-                  <Settings className="h-5 w-5 text-yellow-400" />
-                </div>
-                Twilio Operations
-              </CardTitle>
-              <CardDescription>
-                Twilio-specific operations (Coming Soon)
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Link href="/twilio">
-                <Button className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white shadow-lg shadow-yellow-500/30 transition-all duration-200">
-                  View Twilio
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
+      {hasAccess("/twilio") && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold bg-gradient-to-r from-yellow-400 to-amber-500 bg-clip-text text-transparent">
+            Twilio
+          </h2>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <Card className="border-yellow-800/50 hover:border-yellow-500/80 transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/20 hover:scale-[1.02] bg-gradient-to-br from-slate-900 to-slate-950">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-gradient-to-br from-yellow-500/20 to-amber-600/20">
+                    <Settings className="h-5 w-5 text-yellow-400" />
+                  </div>
+                  Twilio Operations
+                </CardTitle>
+                <CardDescription>
+                  Twilio-specific operations (Coming Soon)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/twilio">
+                  <Button className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white shadow-lg shadow-yellow-500/30 transition-all duration-200">
+                    View Twilio
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Simwood Section */}
+      {hasAccess("/simwood") && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+            Simwood
+          </h2>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <Card className="border-cyan-800/50 hover:border-cyan-500/80 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 hover:scale-[1.02] bg-gradient-to-br from-slate-900 to-slate-950">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-600/20">
+                    <Phone className="h-5 w-5 text-cyan-400" />
+                  </div>
+                  Simwood Operations
+                </CardTitle>
+                <CardDescription>
+                  Manage numbers, CDRs, and port-in workflows
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/simwood">
+                  <Button className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white shadow-lg shadow-cyan-500/30 transition-all duration-200">
+                    Open Simwood
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {/* Admin Section */}
       {hasAccess("/audit-logs") && (
