@@ -18,7 +18,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { REGIONS } from "@/lib/regions";
 import { AUDIT_LOG_ACTIONS } from "@/lib/constants";
 
 interface AuditLog {
@@ -52,7 +51,6 @@ export default function AuditLogsPage() {
   const [sortBy, setSortBy] = useState<"username" | "createdAt">("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [searchUsername, setSearchUsername] = useState("");
-  const [filterRegion, setFilterRegion] = useState("all");
   const [filterAction, setFilterAction] = useState("all");
 
   const fetchAuditLogs = async () => {
@@ -74,10 +72,6 @@ export default function AuditLogsPage() {
 
       if (searchUsername) {
         params.append("searchUsername", searchUsername);
-      }
-
-      if (filterRegion && filterRegion !== "all") {
-        params.append("filterRegion", filterRegion);
       }
 
       if (filterAction && filterAction !== "all") {
@@ -105,13 +99,13 @@ export default function AuditLogsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPagination((prev) => ({ ...prev, page: 1 }));
-  }, [searchUsername, filterRegion, filterAction]);
+  }, [searchUsername, filterAction]);
 
   // Fetch data when pagination, sort, or filters change
   useEffect(() => {
     fetchAuditLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, pagination.limit, sortBy, sortOrder, searchUsername, filterRegion, filterAction]);
+  }, [pagination.page, pagination.limit, sortBy, sortOrder, searchUsername, filterAction]);
 
   const handleSort = (field: "username" | "createdAt") => {
     if (sortBy === field) {
@@ -173,7 +167,7 @@ export default function AuditLogsPage() {
           <CardContent>
             {/* Search and Filter Section */}
             <div className="mb-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Username Search */}
                 <div className="space-y-2">
                   <Label htmlFor="search-username" className="text-slate-300">
@@ -198,38 +192,6 @@ export default function AuditLogsPage() {
                       </button>
                     )}
                   </div>
-                </div>
-
-                {/* Region Filter */}
-                <div className="space-y-2">
-                  <Label htmlFor="filter-region" className="text-slate-300">
-                    Filter by Region
-                  </Label>
-                  <Select value={filterRegion} onValueChange={setFilterRegion}>
-                    <SelectTrigger
-                      id="filter-region"
-                      className="bg-slate-800 border-slate-700 text-slate-200"
-                    >
-                      <SelectValue placeholder="All Regions" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-800 border-slate-700">
-                      <SelectItem
-                        value="all"
-                        className="text-slate-200 hover:bg-slate-700 focus:bg-slate-700"
-                      >
-                        All Regions
-                      </SelectItem>
-                      {REGIONS.map((region) => (
-                        <SelectItem
-                          key={region.code}
-                          value={region.code}
-                          className="text-slate-200 hover:bg-slate-700 focus:bg-slate-700"
-                        >
-                          {region.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 {/* Action Filter */}
@@ -266,7 +228,7 @@ export default function AuditLogsPage() {
               </div>
 
               {/* Active Filters Display */}
-              {(searchUsername || (filterRegion && filterRegion !== "all") || (filterAction && filterAction !== "all")) && (
+              {(searchUsername || (filterAction && filterAction !== "all")) && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm text-slate-400">Active filters:</span>
                   {searchUsername && (
@@ -275,17 +237,6 @@ export default function AuditLogsPage() {
                       <button
                         onClick={() => setSearchUsername("")}
                         className="hover:text-blue-300"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  )}
-                  {filterRegion && filterRegion !== "all" && (
-                    <span className="px-2 py-1 rounded bg-purple-500/20 text-purple-400 text-xs font-medium flex items-center gap-1">
-                      Region: {REGIONS.find((r) => r.code === filterRegion)?.name || filterRegion}
-                      <button
-                        onClick={() => setFilterRegion("all")}
-                        className="hover:text-purple-300"
                       >
                         <X className="h-3 w-3" />
                       </button>

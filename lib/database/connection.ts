@@ -1,27 +1,17 @@
-import { AppDataSource } from "./data-source";
+import type { DataSource } from "typeorm";
+import { getDataSource } from "./data-source";
 
-let isInitialized = false;
+let cached: DataSource | null = null;
 
-export async function getDatabaseConnection() {
-  if (!isInitialized) {
-    if (!AppDataSource.isInitialized) {
-      try {
-        await AppDataSource.initialize();
-      } catch (error) {
-        // If initialization fails, log but don't crash
-        console.error("Database initialization error:", error);
-        throw error;
-      }
-    }
-    isInitialized = true;
+export async function getDatabaseConnection(): Promise<DataSource> {
+  if (!cached?.isInitialized) {
+    cached = await getDataSource();
   }
-  return AppDataSource;
+  return cached;
 }
 
-// For Next.js API routes
-export async function withDatabase<T>(
-  callback: (dataSource: typeof AppDataSource) => Promise<T>
-): Promise<T> {
+/** For Next.js API routes — reuses the same initialized DataSource. */
+export async function withDatabase<T>(callback: (dataSource: DataSource) => Promise<T>): Promise<T> {
   const dataSource = await getDatabaseConnection();
   try {
     return await callback(dataSource);
@@ -29,5 +19,4 @@ export async function withDatabase<T>(
     console.error("Database operation error:", error);
     throw error;
   }
-  // Don't close connection in Next.js - keep it alive
 }

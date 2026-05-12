@@ -1,7 +1,7 @@
 "use client";
 
 import { Phone, Menu, Users, CheckCircle, Pause, Play, ParkingCircle, ArrowRightLeft, Voicemail, X, Radio, Volume2 } from "lucide-react";
-import type { CallFlowEvent } from "@/types/grpc";
+import type { CallFlowEvent } from "@/types/ops-api";
 import { cn } from "@/lib/utils";
 
 interface CallFlowTimelineProps {

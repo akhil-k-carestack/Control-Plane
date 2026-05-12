@@ -1,58 +1,34 @@
 export interface RegionConfig {
   code: string;
   name: string;
-  grpcHost: string;
-  grpcPort: number;
 }
 
 /**
- * Region configurations loaded from environment variables.
- * To add a new region:
- * 1. Add environment variables: GRPC_<REGION_CODE>_HOST and GRPC_<REGION_CODE>_PORT
- * 2. Add a new entry to the REGIONS array below
- * 
- * Example for a new region "EU":
- * - Environment variables: GRPC_EU_HOST, GRPC_EU_PORT
- * - Add: { code: "EU", name: "Europe", grpcHost: process.env.GRPC_EU_HOST || "localhost", grpcPort: parseInt(process.env.GRPC_EU_PORT || "50054", 10) }
+ * Single ops region (no multi-region UI).
+ * Server: OPS_REGION. Client (bundled): NEXT_PUBLIC_OPS_REGION.
  */
-export const REGIONS: RegionConfig[] = [
-  {
-    code: "AU-VOICESTACK",
-    name: "AU Voicestack",
-    grpcHost: process.env.GRPC_AU_HOST || "localhost",
-    grpcPort: parseInt(process.env.GRPC_AU_PORT || "50051", 10),
-  },
-  {
-    code: "US-VOICESTACK",
-    name: "US Voicestack",
-    grpcHost: process.env.GRPC_US_HOST || "localhost",
-    grpcPort: parseInt(process.env.GRPC_US_PORT || "50052", 10),
-  },
-  {
-    code: "US-CSIQ",
-    name: "US CSIQ",
-    grpcHost: process.env.GRPC_US_HOST || "localhost",
-    grpcPort: parseInt(process.env.GRPC_US_PORT || "50052", 10),
-  },
-  {
-    code: "UK-VOICESTACK",
-    name: "UK Voicestack",
-    grpcHost: process.env.GRPC_UK_HOST || "localhost",
-    grpcPort: parseInt(process.env.GRPC_UK_PORT || "50053", 10),
-  },
-  {
-    code: "UK-CSIQ",
-    name: "UK CSIQ",
-    grpcHost: process.env.GRPC_UK_HOST || "localhost",
-    grpcPort: parseInt(process.env.GRPC_UK_PORT || "50053", 10),
-  },
-];
+export const OPS_REGION_CODE =
+  process.env.OPS_REGION ||
+  process.env.NEXT_PUBLIC_OPS_REGION ||
+  "AU-VOICESTACK";
+
+const DISPLAY_NAMES: Record<string, string> = {
+  "AU-VOICESTACK": "AU Voicestack",
+  "US-VOICESTACK": "US Voicestack",
+  "US-CSIQ": "US CSIQ",
+  "UK-VOICESTACK": "UK Voicestack",
+  "UK-CSIQ": "UK CSIQ",
+};
+
+export function getOpsRegionDisplayName(code: string = OPS_REGION_CODE): string {
+  return DISPLAY_NAMES[code] || code;
+}
 
 export function getRegionConfig(code: string): RegionConfig | undefined {
-  return REGIONS.find((r) => r.code === code);
+  if (code !== OPS_REGION_CODE) return undefined;
+  return { code: OPS_REGION_CODE, name: getOpsRegionDisplayName() };
 }
 
 export function isValidRegion(code: string): boolean {
-  return REGIONS.some((r) => r.code === code);
+  return code === OPS_REGION_CODE;
 }
-

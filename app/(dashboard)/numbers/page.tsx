@@ -29,7 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { GetNumbersNotInBifrostResponse } from "@/types/grpc";
+import type { GetNumbersNotInBifrostResponse } from "@/types/ops-api";
 
 const formSchema = z.object({
   trunkSid: z.string().min(1, "Trunk SID is required"),
@@ -82,12 +82,17 @@ export default function NumbersPage() {
         }),
       });
 
-      const result = await response.json();
+      const raw = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Failed to fetch numbers");
+        throw new Error(
+          typeof raw === "object" && raw !== null && "error" in raw && typeof (raw as { error?: unknown }).error === "string"
+            ? (raw as { error: string }).error
+            : "Failed to fetch numbers"
+        );
       }
 
+      const result = raw as GetNumbersNotInBifrostResponse;
       setResult(result);
       const totalNumbers = Object.values(result.practiceNumbers || {}).reduce(
         (sum, list) => sum + (list.phoneNumbers?.length || 0),

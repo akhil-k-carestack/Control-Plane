@@ -1,7 +1,7 @@
 /**
  * SIMWOOD API Client
  * Handles all SIMWOOD API calls with basic authentication.
- * Uses api.simwood.com for account/allocated/available; portal.simwood.com for numbers config, voice CDR, SMS CDR.
+ * Uses api.simwood.com for account/allocated/available; portal.simwood.com for numbers config, voice CDR, SMS CDR, channel history.
  */
 
 const SIMWOOD_API_BASE = "https://api.simwood.com/v3";
@@ -324,6 +324,159 @@ export async function getVoiceCdr(
   );
 }
 
+/** Sample interval for portal GET /v4/voice/{account}/channels/history */
+export type ChannelHistoryInterval = "1m" | "5m" | "10m" | "1h";
+
+export interface ChannelHistoryPoint {
+  t: string;
+  inbound: number;
+  outbound: number;
+}
+
+function extractChannelHistoryArray(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (Array.isArray(o.data)) return o.data;
+    if (Array.isArray(o.samples)) return o.samples;
+    if (Array.isArray(o.history)) return o.history;
+  }
+  return [];
+}
+
+function channelRowTime(row: Record<string, unknown>): string {
+  return String(row.datetime ?? row.date ?? row.timestamp ?? row.time ?? "");
+}
+
+/** First finite numeric from row for any of the given keys (portal v4 uses channels_in / channels_out). */
+function channelRowNumber(row: Record<string, unknown>, keys: readonly string[]): number {
+  for (const k of keys) {
+    const v = row[k];
+    if (v === undefined || v === null || v === "") continue;
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n)) return Math.max(0, n);
+  }
+  return 0;
+}
+
+/** Peak total channels when no directional split is present. */
+function channelRowPeak(row: Record<string, unknown>): number {
+  return channelRowNumber(row, ["channels", "channel", "peak", "count"]);
+}
+
+function channelRowInbound(row: Record<string, unknown>): number {
+  return channelRowNumber(row, ["channels_in", "channels_inbound", "inbound", "in"]);
+}
+
+function channelRowOutbound(row: Record<string, unknown>): number {
+  return channelRowNumber(row, ["channels_out", "channels_outbound", "outbound", "out"]);
+}
+
+function channelRowSplit(row: Record<string, unknown>): { in: number; out: number } {
+  return { in: channelRowInbound(row), out: channelRowOutbound(row) };
+}
+
+/**
+ * Recent (~24h) channel utilisation samples (SIMWOOD portal v4).
+ * @see GET https://portal.simwood.com/v4/voice/{ACCOUNT}/channels/history — optional /in and /out before the query string.
+ */
+export async function getChannelHistory(
+  interval: ChannelHistoryInterval,
+  traffic: "both" | "inbound" | "outbound"
+): Promise<ChannelHistoryPoint[]> {
+  const q = `?interval=${encodeURIComponent(interval)}`;
+  const base = `/v4/voice/${SIMWOOD_ACCOUNT_ID}/channels/history`;
+
+  const fetchSegment = async (suffix: string): Promise<unknown> =>
+    simwoodPortalRequest<unknown>(`${base}${suffix}${q}`);
+
+  const toPoint = (row: unknown, mode: "inbound" | "outbound" | "split"): ChannelHistoryPoint => {
+    const r = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+    const t = channelRowTime(r);
+    const split = channelRowSplit(r);
+    const hasPortalDirections =
+      r.channels_in !== undefined ||
+      r.channels_out !== undefined ||
+      split.in > 0 ||
+      split.out > 0;
+    if (hasPortalDirections) {
+      return { t, inbound: split.in, outbound: split.out };
+    }
+    const peak = channelRowPeak(r);
+    if (mode === "inbound") return { t, inbound: peak, outbound: 0 };
+    if (mode === "outbound") return { t, inbound: 0, outbound: peak };
+    return { t, inbound: peak, outbound: 0 };
+  };
+
+  if (traffic === "inbound") {
+    let arr: unknown[] = [];
+    try {
+      arr = extractChannelHistoryArray(await fetchSegment("/in"));
+    } catch {
+      arr = [];
+    }
+    if (arr.length === 0) {
+      arr = extractChannelHistoryArray(await fetchSegment(""));
+    }
+    return arr.map((row) => toPoint(row, "inbound"));
+  }
+
+  if (traffic === "outbound") {
+    let arr: unknown[] = [];
+    try {
+      arr = extractChannelHistoryArray(await fetchSegment("/out"));
+    } catch {
+      arr = [];
+    }
+    if (arr.length === 0) {
+      arr = extractChannelHistoryArray(await fetchSegment(""));
+    }
+    return arr.map((row) => toPoint(row, "outbound"));
+  }
+
+  let inRows: unknown[] = [];
+  let outRows: unknown[] = [];
+  try {
+    inRows = extractChannelHistoryArray(await fetchSegment("/in"));
+  } catch {
+    /* ignore */
+  }
+  try {
+    outRows = extractChannelHistoryArray(await fetchSegment("/out"));
+  } catch {
+    /* ignore */
+  }
+
+  if (inRows.length > 0 || outRows.length > 0) {
+    const maxLen = Math.max(inRows.length, outRows.length);
+    const merged: ChannelHistoryPoint[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      const inR = inRows[i];
+      const outR = outRows[i];
+      const ir = inR && typeof inR === "object" ? (inR as Record<string, unknown>) : {};
+      const or = outR && typeof outR === "object" ? (outR as Record<string, unknown>) : {};
+      const t = channelRowTime(ir) || channelRowTime(or) || String(i);
+      merged.push({
+        t,
+        inbound: channelRowInbound(ir) || channelRowPeak(ir),
+        outbound: channelRowOutbound(or) || channelRowPeak(or),
+      });
+    }
+    return merged;
+  }
+
+  try {
+    const raw = await fetchSegment("");
+    const arr = extractChannelHistoryArray(raw);
+    if (arr.length === 0) {
+      throw new Error("SIMWOOD returned no channel history data");
+    }
+    return arr.map((row) => toPoint(row, "split"));
+  } catch (e) {
+    throw e instanceof Error ? e : new Error("SIMWOOD returned no channel history data");
+  }
+}
+
 /** SMS CDR report response (request latest N) */
 export interface SmsCdrReportResponse {
   quantity: number;
@@ -363,6 +516,24 @@ export interface PortingRequestItem {
 }
 
 /**
+ * GET /porting/{account}/ports/{ref} (GNP) or /porting/{account}/mnp/{ref} (MNP).
+ * Used for lazy loading of associated numbers on the dashboard.
+ */
+export async function getPortingRequestDetail(
+  ref: string,
+  portKind: "local" | "mobile"
+): Promise<Record<string, unknown>> {
+  const enc = encodeURIComponent(String(ref).trim());
+  const path =
+    portKind === "local"
+      ? `/porting/${SIMWOOD_ACCOUNT_ID}/ports/${enc}`
+      : `/porting/${SIMWOOD_ACCOUNT_ID}/mnp/${enc}`;
+  const raw = await simwoodRequest<unknown>(path);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return raw as Record<string, unknown>;
+}
+
+/**
  * Get porting requests list (GNP).
  */
 export async function getPortingRequests(): Promise<PortingRequestItem[]> {
@@ -396,10 +567,12 @@ export async function getPortingRequests(): Promise<PortingRequestItem[]> {
     >(`/porting/${SIMWOOD_ACCOUNT_ID}/mnp`),
   ]);
 
-  const gnpRows =
+  const gnpRowsRaw =
     gnpResult.status === "fulfilled"
       ? extractData(gnpResult.value).map((row) => ({ ...row, port_type: "local" as const }))
       : [];
+
+  const gnpRows = gnpRowsRaw;
 
   const mnpRows =
     mnpResult.status === "fulfilled"
@@ -515,7 +688,8 @@ export interface PortInRequestEntry {
   installationPostcode?: string;
   associatedNumbers?: string;
   contactEmail?: string;
-  lineType?: string;
+  /** Yes/No (optional; blank = No). Used with portal number lookup vs Current Provider to set GNP `type` */
+  isMultiLine?: string;
   pac?: string;
   mbn?: string;
   payload: Record<string, string>;
@@ -559,14 +733,122 @@ function getNestedRecord(source: Record<string, unknown>, key: string): Record<s
     : null;
 }
 
-function normalizePortType(lineType?: string): "single" | "multi" | "sub_single" | "sub_multi" {
-  const value = (lineType || "").trim().toLowerCase();
-  if (value.includes("sub") && value.includes("multi")) return "sub_multi";
-  if (value.includes("sub") && value.includes("single")) return "sub_single";
-  if (value === "subsingle") return "sub_single";
-  if (value === "submulti") return "sub_multi";
-  if (value.includes("multi")) return "multi";
-  return "single";
+function normalizePortingProviderLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Parse Excel Is Multi Line cell: Yes/No (and common variants). Empty / omitted = No. */
+function parseIsMultiLineCell(value?: string): boolean | null {
+  const v = (value ?? "").trim().toLowerCase();
+  if (!v) return false;
+  if (["yes", "y", "true", "1", "multi", "multiline", "multi-line"].includes(v)) return true;
+  if (["no", "n", "false", "0", "single", "single line", "single-line"].includes(v)) return false;
+  return null;
+}
+
+/**
+ * SIMWOOD portal lookup expects international digits (e.g. 44…). National UK numbers often start with 0.
+ */
+function toPortalLookupNumberDigits(raw: string): string {
+  let digits = raw.replace(/\D+/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0044")) {
+    digits = digits.slice(4);
+  }
+  if (digits.startsWith("44")) {
+    return digits;
+  }
+  if (digits.startsWith("0")) {
+    return `44${digits.slice(1)}`;
+  }
+  return digits;
+}
+
+/**
+ * Portal GET /v3/numbers/{account}/lookup/{number} — range holder for porting type rules.
+ */
+export async function lookupNumberRangeHolder(fullNumberDigits: string): Promise<unknown> {
+  const digits = toPortalLookupNumberDigits(fullNumberDigits);
+  if (!digits) {
+    throw new Error("lookup number is empty");
+  }
+  return simwoodPortalRequest<unknown>(
+    `/v3/numbers/${SIMWOOD_ACCOUNT_ID}/lookup/${encodeURIComponent(digits)}`
+  );
+}
+
+function extractRangeHolderFromLookupPayload(payload: unknown): string {
+  const seen = new WeakSet<object>();
+
+  const scoreKey = (key: string): number => {
+    const k = key.toLowerCase();
+    if (k === "rh" || k === "range_holder" || k === "rangeholder") return 100;
+    if (k.includes("range") && k.includes("hold")) return 90;
+    if (k.includes("holder")) return 80;
+    if (k.includes("range") && k.includes("oper")) return 70;
+    if (k === "operator" || k === "donor" || k.includes("network")) return 40;
+    return 0;
+  };
+
+  const walk = (node: unknown, depth: number): string => {
+    if (depth > 8 || node == null) return "";
+    if (typeof node === "string") return node.trim();
+    if (typeof node !== "object" || Array.isArray(node)) return "";
+    if (seen.has(node as object)) return "";
+    seen.add(node as object);
+    const o = node as Record<string, unknown>;
+
+    let best = "";
+    let bestScore = 0;
+    for (const [k, v] of Object.entries(o)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      const s = scoreKey(k);
+      if (s > bestScore) {
+        bestScore = s;
+        best = v.trim();
+      }
+    }
+    if (bestScore >= 40) return best;
+
+    const nestedKeys = ["data", "result", "lookup", "number", "payload", "response", "details"];
+    for (const nk of nestedKeys) {
+      const child = o[nk];
+      if (child && typeof child === "object") {
+        const inner = walk(child, depth + 1);
+        if (inner) return inner;
+      }
+    }
+    for (const v of Object.values(o)) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const inner = walk(v, depth + 1);
+        if (inner) return inner;
+      }
+    }
+    return "";
+  };
+
+  return walk(payload, 0);
+}
+
+/**
+ * After portal lookup: compare range holder (RH) to Current Provider and Is Multi Line.
+ * - Multi + same → multi
+ * - Multi + different → sub_multi
+ * - Not multi + same → single
+ * - Not multi + different → sub_single
+ */
+export function deriveGnpPortTypeFromLookup(
+  isMultiLine: boolean,
+  currentProvider: string,
+  rangeHolder: string
+): "single" | "multi" | "sub_single" | "sub_multi" {
+  const cp = normalizePortingProviderLabel(currentProvider);
+  const rh = normalizePortingProviderLabel(rangeHolder);
+  const same = cp.length > 0 && rh.length > 0 && cp === rh;
+  if (isMultiLine) {
+    return same ? "multi" : "sub_multi";
+  }
+  return same ? "single" : "sub_single";
 }
 
 function parseAssociatedNumbers(value?: string): string[] {
@@ -593,6 +875,26 @@ export async function createPortInRequest(
       body: JSON.stringify(payload),
     });
   } else {
+    const lookupDigits = (entry.mainBillingNumber?.trim() || entry.number).replace(/\D+/g, "");
+    const lookupPayload = await lookupNumberRangeHolder(lookupDigits);
+    const rangeHolder = extractRangeHolderFromLookupPayload(lookupPayload);
+    if (!rangeHolder.trim()) {
+      throw new Error(
+        "Could not read range holder from SIMWOOD portal lookup. Check number format and portal /v3/numbers/{account}/lookup response."
+      );
+    }
+    const multiParsed = parseIsMultiLineCell(entry.isMultiLine);
+    if (multiParsed === null) {
+      throw new Error(
+        'Is Multi Line must be Yes or No when provided (leave blank for No).'
+      );
+    }
+    const portType = deriveGnpPortTypeFromLookup(
+      multiParsed,
+      entry.currentProvider?.trim() || "",
+      rangeHolder
+    );
+
     const numbers = [
       { number: entry.mainBillingNumber?.trim() || entry.number, type: "mbn", action: "port" },
       ...parseAssociatedNumbers(entry.associatedNumbers).map((num) => ({
@@ -609,7 +911,7 @@ export async function createPortInRequest(
       contact_email: entry.contactEmail?.trim() || "",
       account_number: entry.accountNumber?.trim() || "",
       billing_postcode: entry.installationPostcode?.trim() || "",
-      type: normalizePortType(entry.lineType),
+      type: portType,
       lines: Number(entry.numberOfLines || "0") || 1,
       channels: Number(entry.numberOfChannels || "0") || 1,
       customer: {

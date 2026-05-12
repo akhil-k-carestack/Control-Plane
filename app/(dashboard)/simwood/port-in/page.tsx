@@ -39,7 +39,8 @@ interface PortInEntry {
   installationPostcode: string;
   associatedNumbers: string;
   contactEmail: string;
-  lineType: string;
+  /** Yes / No (optional; blank = No). Used with SIMWOOD portal lookup vs Current Provider for GNP type */
+  isMultiLine: string;
   pac: string;
   payload: Record<string, string>;
 }
@@ -142,7 +143,14 @@ export default function SimwoodPortInPage() {
         const installationPostcode = getFromAliases(row, ["installationPostcode", "postcode", "zip", "postalCode"]);
         const associatedNumbers = getFromAliases(row, ["associatedNumbers", "associateNumbers", "associated"]);
         const contactEmail = getFromAliases(row, ["contactEmail", "email", "contact"]);
-        const lineType = getFromAliases(row, ["lineType", "singleOrMultiline", "singleLineOrMultiline"]);
+        const isMultiLine = getFromAliases(row, [
+          "Is Multi Line",
+          "isMultiLine",
+          "is_multiline",
+          "multiLine",
+          "multiline",
+          "multi line",
+        ]);
         const pac = getFromAliases(row, ["pac", "portingAuthorisationCode", "portingAuthorizationCode"]);
         const numberType = toNumberType(typeValue);
         const rowNumber = index + 2;
@@ -164,7 +172,18 @@ export default function SimwoodPortInPage() {
           if (!installationTownCity) rowErrors.push(`Row ${rowNumber}: Installation Town/City is required for local`);
           if (!installationPostcode) rowErrors.push(`Row ${rowNumber}: Installation Postcode is required for local`);
           if (!contactEmail) rowErrors.push(`Row ${rowNumber}: Contact Email is required for local`);
+          if (isMultiLine.trim()) {
+            const v = isMultiLine.trim().toLowerCase();
+            const ok = ["yes", "y", "no", "n", "true", "false", "1", "0"].includes(v);
+            if (!ok) {
+              rowErrors.push(`Row ${rowNumber}: Is Multi Line must be Yes or No when set (or leave blank for No)`);
+            }
+          }
         }
+
+        const isMultiLineCellOk =
+          !isMultiLine ||
+          ["yes", "y", "no", "n", "true", "false", "1", "0"].includes(isMultiLine.trim().toLowerCase());
 
         const isValidMobile = number && numberType === "mobile" && pac;
         const isValidLocal =
@@ -183,7 +202,7 @@ export default function SimwoodPortInPage() {
           installationTownCity &&
           installationPostcode &&
           contactEmail &&
-          true;
+          isMultiLineCellOk;
 
         if (isValidMobile || isValidLocal) {
           parsedEntries.push({
@@ -205,7 +224,7 @@ export default function SimwoodPortInPage() {
             installationPostcode,
             associatedNumbers,
             contactEmail,
-            lineType,
+            isMultiLine,
             pac,
             payload: row,
           });
@@ -352,7 +371,7 @@ export default function SimwoodPortInPage() {
                 disabled={uploading || processing}
               />
               <p className="text-xs text-slate-400">
-                For local/geographic: Number, Main Billing Number, Account Number, Current Provider, LCP CUPID (from SIMWOOD GET /v3/porting/your-account/lcps), Number of Lines, Number of Channels, Installation Address details, Contact Email. Line Type and Associated Numbers are optional. For mobile: Number and PAC are required.
+                For local/geographic: Number, Main Billing Number, Account Number, Current Provider, LCP CUPID (from SIMWOOD GET /v3/porting/your-account/lcps), Number of Lines, Number of Channels, Installation Address details, Contact Email. Is Multi Line is optional (Yes or No; blank means No). Associated Numbers are optional. GNP line type is chosen from portal number lookup vs Current Provider. For mobile: Number and PAC are required.
               </p>
             </div>
 
@@ -459,7 +478,7 @@ export default function SimwoodPortInPage() {
                         <TableHead>Lines/Channels</TableHead>
                         <TableHead>Installation Address</TableHead>
                         <TableHead>Email</TableHead>
-                        <TableHead>Line Type</TableHead>
+                        <TableHead>Is Multi Line</TableHead>
                         <TableHead>Associated Numbers</TableHead>
                         <TableHead>PAC</TableHead>
                       </TableRow>
@@ -496,7 +515,7 @@ export default function SimwoodPortInPage() {
                                 : "—"}
                             </TableCell>
                             <TableCell>{entry.contactEmail || "—"}</TableCell>
-                            <TableCell>{entry.lineType || "—"}</TableCell>
+                            <TableCell>{entry.isMultiLine || "—"}</TableCell>
                             <TableCell>{entry.associatedNumbers || "—"}</TableCell>
                             <TableCell>{entry.pac || "—"}</TableCell>
                           </TableRow>

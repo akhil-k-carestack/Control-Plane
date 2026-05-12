@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { RouteProtection } from "@/components/route-protection";
+import { ChannelUtilisationCard } from "@/components/simwood/channel-utilisation-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,13 @@ import {
 import { toast } from "sonner";
 import { Loader2, Settings, Link2, Phone, MessageSquare, FileText, Trash2, RotateCcw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  normalizePortingDashboardRow,
+  type PortingDashboardRowShape,
+  flattenPortingApiRow,
+  resolvePortingMbn,
+  extractPortingAssociatedNumbers,
+} from "@/lib/porting-row-normalize";
 const VOICE_CDR_SIZES = [10, 100, 1000, 10000] as const;
 const MAX_CDR_DATE_RANGE_DAYS = 30;
 const EMERGENCY999_FIELDS = ["title", "forename", "name", "bussuffix", "premises", "thoroughfare", "locality", "postcode"] as const;
@@ -42,6 +50,7 @@ interface Balance {
   balance: string;
   currency: string;
 }
+
 
 interface MyNumber {
   country_code: string;
@@ -72,13 +81,37 @@ interface Trunk {
   enabled_webrtc: string | null;
 }
 
-interface PortingDashboardItem {
-  ref: string;
-  mbn: string;
-  date: string;
-  crd: string;
-  status: string;
-  statusCode: string;
+type PortingDashboardItem = PortingDashboardRowShape;
+
+const PORTING_DASHBOARD_ASSOC_SECTION = {
+  acceptedToday: "porting-assoc-accepted-today",
+  acceptedTomorrow: "porting-assoc-accepted-tomorrow",
+  completedYesterday: "porting-assoc-completed-yesterday",
+  completedToday: "porting-assoc-completed-today",
+} as const;
+
+function portingRowNeedsAssociatedFetch(row: PortingDashboardItem): boolean {
+  if (row.ref === "—" || !String(row.ref).trim()) return false;
+  if (row.associatedNumbers.trim()) return false;
+  if (row.associatedDetailLoaded) return false;
+  return true;
+}
+
+/** Comma-separated numbers for clipboard (MBN + associated), same rules as copy. */
+function buildPortingSectionNumbersList(rows: PortingDashboardItem[]): string {
+  return rows
+    .flatMap((row) => {
+      const parts = [row.mbn.trim()];
+      if (row.associatedNumbers.trim()) {
+        parts.push(...row.associatedNumbers.split(",").map((s) => s.trim()));
+      }
+      return [...new Set(parts.filter((value) => value && value !== "—"))];
+    })
+    .join(",");
+}
+
+function portingSectionHasNumbersToCopy(rows: PortingDashboardItem[]): boolean {
+  return buildPortingSectionNumbersList(rows).length > 0;
 }
 
 const PORTING_STATUS_LABELS: Record<string, string> = {
@@ -167,6 +200,8 @@ export default function SimwoodPage() {
   const [portingUpcomingAcceptedOnly, setPortingUpcomingAcceptedOnly] = useState(false);
   const [portingPage, setPortingPage] = useState(1);
   const PORTING_PAGE_SIZE = 10;
+  const [portingAssocLoadingByKey, setPortingAssocLoadingByKey] = useState<Record<string, boolean>>({});
+  const [portingAssocSectionLoading, setPortingAssocSectionLoading] = useState<Record<string, boolean>>({});
 
   // Load balance on mount
   useEffect(() => {
@@ -335,16 +370,38 @@ export default function SimwoodPage() {
             const crdDate = toDateOnly(crdRaw);
             return !!crdDate && crdDate.getTime() === tomorrow.getTime();
           })
-          .map((row) => ({
-            country_code: "",
-            number: String(row.mbn ?? row.msisdn ?? row.number ?? ""),
-            gold_price: "",
-            block: "",
-            type: String(row.port_type ?? (row.msisdn ? "mobile" : "local")),
-            SMS: "",
-            crd: String(row.crd ?? row.date_port ?? "—"),
-            status: String(row.status ?? row.status_code ?? "—"),
-          }))
+          .flatMap((row) => {
+            const rec = row as Record<string, unknown>;
+            const flat = flattenPortingApiRow(rec);
+            const primaryRaw =
+              resolvePortingMbn(flat) ||
+              String(flat.mbn ?? flat.msisdn ?? flat.number ?? rec.mbn ?? rec.msisdn ?? rec.number ?? "").trim();
+            if (!primaryRaw) return [];
+
+            const assocStr = extractPortingAssociatedNumbers(flat, primaryRaw);
+            const assocParts = assocStr
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const uniqueNumbers = [...new Set([primaryRaw, ...assocParts])];
+
+            const portType = String(
+              flat.port_type ?? rec.port_type ?? (flat.msisdn || rec.msisdn ? "mobile" : "local")
+            );
+            const crdVal = String(flat.crd ?? flat.date_port ?? rec.crd ?? rec.date_port ?? "—");
+            const statusVal = String(flat.status ?? flat.status_code ?? rec.status ?? rec.status_code ?? "—");
+
+            return uniqueNumbers.map((numStr) => ({
+              country_code: "",
+              number: numStr,
+              gold_price: "",
+              block: "",
+              type: portType,
+              SMS: "",
+              crd: crdVal,
+              status: statusVal,
+            }));
+          })
           .filter((item) => item.number.trim().length > 0);
 
         const enrichedList = await Promise.all(
@@ -738,14 +795,9 @@ export default function SimwoodPage() {
         data?: Array<Record<string, unknown>>;
       };
       const rows = Array.isArray(result.data) ? result.data : [];
-      const normalized: PortingDashboardItem[] = rows.map((row) => ({
-        ref: String(row.ref ?? row.orderid ?? "—"),
-        mbn: String(row.mbn ?? "—"),
-        date: String(row.date ?? row.date_added ?? "—"),
-        crd: String(row.crd ?? row.date_port ?? "—"),
-        status: String(row.status ?? row.status_code ?? "—"),
-        statusCode: String(row.status_code ?? ""),
-      }));
+      const normalized: PortingDashboardItem[] = rows.map((row) =>
+        normalizePortingDashboardRow(row as Record<string, unknown>)
+      );
       setPortingDashboardRows(normalized);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load porting dashboard");
@@ -753,6 +805,158 @@ export default function SimwoodPage() {
     } finally {
       setPortingDashboardLoading(false);
     }
+  };
+
+  const portingRowDetailKey = (row: PortingDashboardItem) => `${row.portKind}:${row.ref}`;
+
+  const fetchPortingAssocFromApi = async (row: PortingDashboardItem): Promise<string> => {
+    const qs = new URLSearchParams({ ref: row.ref, kind: row.portKind });
+    const res = await fetch(`/api/simwood/porting-detail?${qs}`);
+    const body = (await res.json()) as { error?: string; associatedNumbers?: string };
+    if (!res.ok) {
+      throw new Error(body.error || "Failed to load associated numbers");
+    }
+    return typeof body.associatedNumbers === "string" ? body.associatedNumbers : "";
+  };
+
+  const loadPortingAssociatedNumbers = async (row: PortingDashboardItem) => {
+    const key = portingRowDetailKey(row);
+    if (row.ref === "—" || !String(row.ref).trim()) return;
+    if (row.associatedNumbers.trim()) return;
+    if (row.associatedDetailLoaded) return;
+
+    setPortingAssocLoadingByKey((prev) => ({ ...prev, [key]: true }));
+    try {
+      const assoc = await fetchPortingAssocFromApi(row);
+      setPortingDashboardRows((prev) =>
+        prev.map((r) =>
+          portingRowDetailKey(r) === key
+            ? { ...r, associatedNumbers: assoc.trim(), associatedDetailLoaded: true }
+            : r
+        )
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load associated numbers");
+    } finally {
+      setPortingAssocLoadingByKey((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const loadPortingAssociatedForSection = async (
+    rows: PortingDashboardItem[],
+    sectionId: (typeof PORTING_DASHBOARD_ASSOC_SECTION)[keyof typeof PORTING_DASHBOARD_ASSOC_SECTION]
+  ) => {
+    const pending = rows.filter(portingRowNeedsAssociatedFetch);
+    if (pending.length === 0) {
+      toast.info("Associated numbers are already loaded for every row in this section.");
+      return;
+    }
+
+    const keys = pending.map(portingRowDetailKey);
+    setPortingAssocSectionLoading((s) => ({ ...s, [sectionId]: true }));
+    setPortingAssocLoadingByKey((prev) => {
+      const next = { ...prev };
+      for (const k of keys) next[k] = true;
+      return next;
+    });
+
+    try {
+      const outcomes = await Promise.all(
+        pending.map(async (row) => {
+          const key = portingRowDetailKey(row);
+          try {
+            const assoc = await fetchPortingAssocFromApi(row);
+            return { key, ok: true as const, assoc };
+          } catch (e) {
+            return {
+              key,
+              ok: false as const,
+              error: e instanceof Error ? e.message : "Failed to load",
+            };
+          }
+        })
+      );
+
+      const okMap = new Map<string, string>();
+      for (const o of outcomes) {
+        if (o.ok) okMap.set(o.key, o.assoc.trim());
+      }
+      if (okMap.size > 0) {
+        setPortingDashboardRows((prev) =>
+          prev.map((r) => {
+            const k = portingRowDetailKey(r);
+            if (!okMap.has(k)) return r;
+            return {
+              ...r,
+              associatedNumbers: okMap.get(k)!,
+              associatedDetailLoaded: true,
+            };
+          })
+        );
+      }
+
+      const failed = outcomes.filter((o) => !o.ok);
+      if (failed.length > 0) {
+        toast.error(
+          failed.length === outcomes.length
+            ? "Failed to load associated numbers for this section."
+            : `${failed.length} of ${outcomes.length} rows failed to load associated numbers.`
+        );
+      }
+    } finally {
+      setPortingAssocSectionLoading((s) => {
+        const next = { ...s };
+        delete next[sectionId];
+        return next;
+      });
+      setPortingAssocLoadingByKey((prev) => {
+        const next = { ...prev };
+        for (const k of keys) delete next[k];
+        return next;
+      });
+    }
+  };
+
+  const renderPortingAssociatedCell = (row: PortingDashboardItem) => {
+    const key = portingRowDetailKey(row);
+    const loading = Boolean(portingAssocLoadingByKey[key]);
+    const assocTextClass = "text-sm text-slate-400 break-all font-normal";
+
+    if (row.associatedNumbers.trim()) {
+      return <span className={assocTextClass}>{row.associatedNumbers}</span>;
+    }
+    if (row.associatedDetailLoaded) {
+      return <span className={assocTextClass}>—</span>;
+    }
+    if (row.ref === "—" || !String(row.ref).trim()) {
+      return <span className={assocTextClass}>—</span>;
+    }
+    if (loading) {
+      return (
+        <span
+          className="inline-flex h-7 items-center justify-start"
+          aria-busy="true"
+          aria-label="Loading associated numbers"
+        >
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-400" aria-hidden />
+        </span>
+      );
+    }
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 text-xs"
+        onClick={() => void loadPortingAssociatedNumbers(row)}
+      >
+        Show
+      </Button>
+    );
   };
 
   const toLocalDateOnly = (value: string): Date | null => {
@@ -866,7 +1070,9 @@ export default function SimwoodPage() {
       const search = portingSearch.trim().toLowerCase();
       if (search) {
         const matched =
-          row.mbn.toLowerCase().includes(search) || row.ref.toLowerCase().includes(search);
+          row.mbn.toLowerCase().includes(search) ||
+          row.ref.toLowerCase().includes(search) ||
+          row.associatedNumbers.toLowerCase().includes(search);
         if (!matched) return false;
       }
 
@@ -934,10 +1140,7 @@ export default function SimwoodPage() {
     rows: PortingDashboardItem[],
     sectionLabel: string
   ) => {
-    const list = rows
-      .map((row) => row.mbn.trim())
-      .filter((value) => value && value !== "—")
-      .join(",");
+    const list = buildPortingSectionNumbersList(rows);
     if (!list) {
       toast.error(`No numbers available in ${sectionLabel}`);
       return;
@@ -992,6 +1195,7 @@ export default function SimwoodPage() {
             <TabsTrigger value="gold-numbers">Gold</TabsTrigger>
             <TabsTrigger value="voice-cdr">Voice CDR</TabsTrigger>
             <TabsTrigger value="sms-cdr">SMS CDR</TabsTrigger>
+            <TabsTrigger value="channel-utilisation">Channels</TabsTrigger>
             <TabsTrigger value="porting-dashboard">Port In</TabsTrigger>
           </TabsList>
 
@@ -1579,6 +1783,10 @@ export default function SimwoodPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="channel-utilisation" className="space-y-4">
+          {activeTab === "channel-utilisation" ? <ChannelUtilisationCard /> : null}
+        </TabsContent>
+
         <TabsContent value="porting-dashboard" className="space-y-4">
           <Card>
             <CardHeader>
@@ -1680,20 +1888,43 @@ export default function SimwoodPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <Card>
                   <CardHeader>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <CardTitle className="text-base">
                         Accepted{" "}
                         <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           CRD Today
                         </span>
                       </CardTitle>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copySectionNumbers(acceptedTodayRows, "Accepted - today")}
-                      >
-                        Copy numbers
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            acceptedTodayRows.length === 0 ||
+                            portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.acceptedToday] ||
+                            !acceptedTodayRows.some(portingRowNeedsAssociatedFetch)
+                          }
+                          onClick={() =>
+                            void loadPortingAssociatedForSection(
+                              acceptedTodayRows,
+                              PORTING_DASHBOARD_ASSOC_SECTION.acceptedToday
+                            )
+                          }
+                        >
+                          {portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.acceptedToday] ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Show associated
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!portingSectionHasNumbersToCopy(acceptedTodayRows)}
+                          onClick={() => copySectionNumbers(acceptedTodayRows, "Accepted - today")}
+                        >
+                          Copy numbers
+                        </Button>
+                      </div>
                     </div>
                     <CardDescription>{acceptedTodayRows.length} requests</CardDescription>
                   </CardHeader>
@@ -1703,6 +1934,7 @@ export default function SimwoodPage() {
                         <TableRow>
                           <TableHead>Ref</TableHead>
                           <TableHead>Number</TableHead>
+                          <TableHead>Associated</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>CRD</TableHead>
                           <TableHead>Status</TableHead>
@@ -1713,6 +1945,9 @@ export default function SimwoodPage() {
                           <TableRow key={`today-${row.ref}`}>
                             <TableCell>{row.ref}</TableCell>
                             <TableCell>{row.mbn}</TableCell>
+                            <TableCell className="max-w-[200px] whitespace-normal break-all">
+                              {renderPortingAssociatedCell(row)}
+                            </TableCell>
                             <TableCell>{formatDateOnly(row.date)}</TableCell>
                             <TableCell>{formatDateOnly(row.crd)}</TableCell>
                             <TableCell>
@@ -1724,7 +1959,7 @@ export default function SimwoodPage() {
                         ))}
                         {acceptedTodayRows.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-slate-400">
+                            <TableCell colSpan={6} className="text-slate-400">
                               No accepted requests for today.
                             </TableCell>
                           </TableRow>
@@ -1736,20 +1971,43 @@ export default function SimwoodPage() {
 
                 <Card>
                   <CardHeader>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <CardTitle className="text-base">
                         Accepted{" "}
                         <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30">
                           CRD Tomorrow
                         </span>
                       </CardTitle>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copySectionNumbers(acceptedTomorrowRows, "Accepted - tomorrow")}
-                      >
-                        Copy numbers
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            acceptedTomorrowRows.length === 0 ||
+                            portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.acceptedTomorrow] ||
+                            !acceptedTomorrowRows.some(portingRowNeedsAssociatedFetch)
+                          }
+                          onClick={() =>
+                            void loadPortingAssociatedForSection(
+                              acceptedTomorrowRows,
+                              PORTING_DASHBOARD_ASSOC_SECTION.acceptedTomorrow
+                            )
+                          }
+                        >
+                          {portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.acceptedTomorrow] ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Show associated
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!portingSectionHasNumbersToCopy(acceptedTomorrowRows)}
+                          onClick={() => copySectionNumbers(acceptedTomorrowRows, "Accepted - tomorrow")}
+                        >
+                          Copy numbers
+                        </Button>
+                      </div>
                     </div>
                     <CardDescription>{acceptedTomorrowRows.length} requests</CardDescription>
                   </CardHeader>
@@ -1759,6 +2017,7 @@ export default function SimwoodPage() {
                         <TableRow>
                           <TableHead>Ref</TableHead>
                           <TableHead>Number</TableHead>
+                          <TableHead>Associated</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>CRD</TableHead>
                           <TableHead>Status</TableHead>
@@ -1769,6 +2028,9 @@ export default function SimwoodPage() {
                           <TableRow key={`tomorrow-${row.ref}`}>
                             <TableCell>{row.ref}</TableCell>
                             <TableCell>{row.mbn}</TableCell>
+                            <TableCell className="max-w-[200px] whitespace-normal break-all">
+                              {renderPortingAssociatedCell(row)}
+                            </TableCell>
                             <TableCell>{formatDateOnly(row.date)}</TableCell>
                             <TableCell>{formatDateOnly(row.crd)}</TableCell>
                             <TableCell>
@@ -1780,7 +2042,7 @@ export default function SimwoodPage() {
                         ))}
                         {acceptedTomorrowRows.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-slate-400">
+                            <TableCell colSpan={6} className="text-slate-400">
                               No accepted requests for tomorrow.
                             </TableCell>
                           </TableRow>
@@ -1792,20 +2054,43 @@ export default function SimwoodPage() {
 
                 <Card>
                   <CardHeader>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <CardTitle className="text-base">
                         Completed{" "}
                         <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-violet-500/20 text-violet-300 border border-violet-500/30">
                           CRD Yesterday
                         </span>
                       </CardTitle>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copySectionNumbers(completedYesterdayRows, "Completed - yesterday")}
-                      >
-                        Copy numbers
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            completedYesterdayRows.length === 0 ||
+                            portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.completedYesterday] ||
+                            !completedYesterdayRows.some(portingRowNeedsAssociatedFetch)
+                          }
+                          onClick={() =>
+                            void loadPortingAssociatedForSection(
+                              completedYesterdayRows,
+                              PORTING_DASHBOARD_ASSOC_SECTION.completedYesterday
+                            )
+                          }
+                        >
+                          {portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.completedYesterday] ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Show associated
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!portingSectionHasNumbersToCopy(completedYesterdayRows)}
+                          onClick={() => copySectionNumbers(completedYesterdayRows, "Completed - yesterday")}
+                        >
+                          Copy numbers
+                        </Button>
+                      </div>
                     </div>
                     <CardDescription>{completedYesterdayRows.length} requests</CardDescription>
                   </CardHeader>
@@ -1815,6 +2100,7 @@ export default function SimwoodPage() {
                         <TableRow>
                           <TableHead>Ref</TableHead>
                           <TableHead>Number</TableHead>
+                          <TableHead>Associated</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>CRD</TableHead>
                           <TableHead>Status</TableHead>
@@ -1825,6 +2111,9 @@ export default function SimwoodPage() {
                           <TableRow key={`completed-yesterday-${row.ref}`}>
                             <TableCell>{row.ref}</TableCell>
                             <TableCell>{row.mbn}</TableCell>
+                            <TableCell className="max-w-[200px] whitespace-normal break-all">
+                              {renderPortingAssociatedCell(row)}
+                            </TableCell>
                             <TableCell>{formatDateOnly(row.date)}</TableCell>
                             <TableCell>{formatDateOnly(row.crd)}</TableCell>
                             <TableCell>
@@ -1836,7 +2125,7 @@ export default function SimwoodPage() {
                         ))}
                         {completedYesterdayRows.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-slate-400">
+                            <TableCell colSpan={6} className="text-slate-400">
                               No completed requests for yesterday.
                             </TableCell>
                           </TableRow>
@@ -1848,20 +2137,43 @@ export default function SimwoodPage() {
 
                 <Card>
                   <CardHeader>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <CardTitle className="text-base">
                         Completed{" "}
                         <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           CRD Today
                         </span>
                       </CardTitle>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copySectionNumbers(completedTodayRows, "Completed - today")}
-                      >
-                        Copy numbers
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            completedTodayRows.length === 0 ||
+                            portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.completedToday] ||
+                            !completedTodayRows.some(portingRowNeedsAssociatedFetch)
+                          }
+                          onClick={() =>
+                            void loadPortingAssociatedForSection(
+                              completedTodayRows,
+                              PORTING_DASHBOARD_ASSOC_SECTION.completedToday
+                            )
+                          }
+                        >
+                          {portingAssocSectionLoading[PORTING_DASHBOARD_ASSOC_SECTION.completedToday] ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Show associated
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!portingSectionHasNumbersToCopy(completedTodayRows)}
+                          onClick={() => copySectionNumbers(completedTodayRows, "Completed - today")}
+                        >
+                          Copy numbers
+                        </Button>
+                      </div>
                     </div>
                     <CardDescription>{completedTodayRows.length} requests</CardDescription>
                   </CardHeader>
@@ -1871,6 +2183,7 @@ export default function SimwoodPage() {
                         <TableRow>
                           <TableHead>Ref</TableHead>
                           <TableHead>Number</TableHead>
+                          <TableHead>Associated</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>CRD</TableHead>
                           <TableHead>Status</TableHead>
@@ -1881,6 +2194,9 @@ export default function SimwoodPage() {
                           <TableRow key={`completed-today-${row.ref}`}>
                             <TableCell>{row.ref}</TableCell>
                             <TableCell>{row.mbn}</TableCell>
+                            <TableCell className="max-w-[200px] whitespace-normal break-all">
+                              {renderPortingAssociatedCell(row)}
+                            </TableCell>
                             <TableCell>{formatDateOnly(row.date)}</TableCell>
                             <TableCell>{formatDateOnly(row.crd)}</TableCell>
                             <TableCell>
@@ -1892,7 +2208,7 @@ export default function SimwoodPage() {
                         ))}
                         {completedTodayRows.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-slate-400">
+                            <TableCell colSpan={6} className="text-slate-400">
                               No completed requests for today.
                             </TableCell>
                           </TableRow>
@@ -1915,6 +2231,7 @@ export default function SimwoodPage() {
                     <TableRow>
                       <TableHead>Ref</TableHead>
                       <TableHead>Number</TableHead>
+                      <TableHead>Associated</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>CRD</TableHead>
                       <TableHead>Status</TableHead>
@@ -1922,9 +2239,12 @@ export default function SimwoodPage() {
                   </TableHeader>
                   <TableBody>
                     {portingPaginatedRows.map((row) => (
-                      <TableRow key={`porting-${row.ref}-${row.mbn}`}>
+                      <TableRow key={`porting-${row.portKind}-${row.ref}-${row.mbn}`}>
                         <TableCell>{row.ref}</TableCell>
                         <TableCell>{row.mbn}</TableCell>
+                        <TableCell className="max-w-[220px] whitespace-normal break-all">
+                          {renderPortingAssociatedCell(row)}
+                        </TableCell>
                         <TableCell>{formatDateOnly(row.date)}</TableCell>
                         <TableCell>{formatDateOnly(row.crd)}</TableCell>
                         <TableCell>
@@ -1936,7 +2256,7 @@ export default function SimwoodPage() {
                     ))}
                     {!portingDashboardLoading && portingPaginatedRows.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-slate-400">
+                        <TableCell colSpan={6} className="text-slate-400">
                           No matching porting requests.
                         </TableCell>
                       </TableRow>

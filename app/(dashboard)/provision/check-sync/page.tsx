@@ -21,11 +21,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { CheckSyncResponse } from "@/types/grpc";
+import type { CheckSyncResponse } from "@/types/ops-api";
 
 const deviceFormSchema = z.object({
   deviceMake: z.enum(["Yealink", "Polycom"], {
-    errorMap: () => ({ message: "Device make is required" }),
+    message: "Device make is required",
   }),
   sipAccount: z.string().min(1, "SIP account is required"),
 });

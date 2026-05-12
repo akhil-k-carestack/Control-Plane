@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import { REGIONS } from "@/lib/regions";
+import { OPS_REGION_CODE, getOpsRegionDisplayName } from "@/lib/regions";
 
 export async function GET() {
-  // Return regions without sensitive connection details
-  const publicRegions = REGIONS.map(({ code, name }) => ({
-    code,
-    name,
-  }));
-
-  return NextResponse.json(publicRegions);
+  return NextResponse.json([
+    {
+      code: OPS_REGION_CODE,
+      name: getOpsRegionDisplayName(),
+    },
+  ]);
 }
-

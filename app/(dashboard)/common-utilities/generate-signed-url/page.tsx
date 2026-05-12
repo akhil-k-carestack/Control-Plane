@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { GenerateSignedURLResponse } from "@/types/grpc";
+import type { GenerateSignedURLResponse } from "@/types/ops-api";
 
 const formSchema = z.object({
   url: z

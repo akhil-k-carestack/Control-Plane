@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserDetails } from "@/lib/utils";
 import { requirePermissionFromSession, PERMISSIONS } from "@/lib/permissions";
-import { createAppLogDocument } from "@/lib/firebase-admin";
+import { createAppLogDocument } from "@/lib/firestore-app-logs";
 
 interface CreateAppLogBody {
   agentuuid?: string;

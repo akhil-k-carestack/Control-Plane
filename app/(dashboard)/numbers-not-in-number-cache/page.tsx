@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { GetNumbersNotInNumberCacheResponse, PhoneNumberList } from "@/types/grpc";
+import type { GetNumbersNotInNumberCacheResponse, PhoneNumberList } from "@/types/ops-api";
 
 interface NumberRow {
   practiceId: string;

@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useEffect, createContext, useContext } from "react";
+import { createContext, useContext } from "react";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
+import { OPS_REGION_CODE } from "@/lib/regions";
 
-const RegionContext = createContext<{
-  region: string;
-  setRegion: (region: string) => void;
-}>({
-  region: "AU-VOICESTACK",
-  setRegion: () => {},
+const RegionContext = createContext<{ region: string }>({
+  region: OPS_REGION_CODE,
 });
 
 export function useRegion() {
@@ -17,29 +14,14 @@ export function useRegion() {
 }
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [region, setRegionState] = useState("AU-VOICESTACK");
-
-  useEffect(() => {
-    // Load region from localStorage or default to AU-VOICESTACK
-    const savedRegion = localStorage.getItem("selectedRegion");
-    if (savedRegion) {
-      setRegionState(savedRegion);
-    }
-  }, []);
-
-  const setRegion = (newRegion: string) => {
-    setRegionState(newRegion);
-    localStorage.setItem("selectedRegion", newRegion);
-  };
-
   return (
     <div className="flex h-screen bg-slate-950">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header region={region} onRegionChange={setRegion} />
+        <Header />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-7xl">
-            <RegionContext.Provider value={{ region, setRegion }}>
+            <RegionContext.Provider value={{ region: OPS_REGION_CODE }}>
               {children}
             </RegionContext.Provider>
           </div>
@@ -48,4 +30,3 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-

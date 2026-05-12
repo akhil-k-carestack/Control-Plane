@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Practice, CallDetails } from "@/types/grpc";
+import type { Practice, CallDetails } from "@/types/ops-api";
 
 const formSchema = z.object({
   practiceId: z.string().min(1, "Practice is required"),
